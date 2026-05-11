@@ -48,10 +48,17 @@ export type SessionState = {
   nextStake: number;
   price: number;
   config: SessionConfig;
+  // Deriv live connection state
+  derivConnected: boolean;
+  derivAuthorized: boolean;
+  derivAccountId: string | null;
+  derivCurrency: string;
+  derivLiveBalance: number | null;
+  liveSymbol: string;
 };
 
 export const defaultConfig: SessionConfig = {
-  market: "VOL_50",
+  market: "R_50",
   strategy: "only_ups",
   baseStake: 1,
   durationTicks: 5,
@@ -96,6 +103,12 @@ const initial: SessionState = {
   nextStake: defaultConfig.baseStake,
   price: 1000,
   config: defaultConfig,
+  derivConnected: false,
+  derivAuthorized: false,
+  derivAccountId: null,
+  derivCurrency: "USD",
+  derivLiveBalance: null,
+  liveSymbol: "R_50",
 };
 
 export const useSession = create<SessionState & Actions>()(
