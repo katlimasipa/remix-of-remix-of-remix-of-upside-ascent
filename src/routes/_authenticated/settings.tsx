@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel } from "@/components/app-shell";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { DerivClient } from "@/lib/deriv";
+import { ExternalLink, ShieldCheck, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Settings — Tickwise" }] }),
@@ -10,12 +15,105 @@ export const Route = createFileRoute("/_authenticated/settings")({
 
 function Settings() {
   const s = useSession();
+  const { user } = useAuth();
+  const [token, setToken] = useState("");
+  const [savedToken, setSavedToken] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [accountInfo, setAccountInfo] = useState<{ loginid: string; currency: string; balance: number; is_virtual: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("profiles").select("deriv_api_token, deriv_account_id, deriv_currency").eq("id", user.id).maybeSingle().then(({ data }) => {
+      if (data?.deriv_api_token) {
+        setSavedToken(data.deriv_api_token);
+        setToken(data.deriv_api_token);
+      }
+    });
+  }, [user]);
+
+  async function saveAndTest() {
+    if (!user) return;
+    if (!token.trim()) return toast.error("Paste your Deriv API token first.");
+    setTesting(true);
+    const client = new DerivClient();
+    try {
+      await client.connect();
+      const auth = await client.authorize(token.trim());
+      if (!auth.is_virtual) {
+        toast.error("This is a REAL account token. Use a DEMO token only.");
+        client.close();
+        return;
+      }
+      setAccountInfo({
+        loginid: auth.loginid,
+        currency: auth.currency,
+        balance: Number(auth.balance),
+        is_virtual: auth.is_virtual,
+      });
+      await supabase.from("profiles").update({
+        deriv_api_token: token.trim(),
+        deriv_account_id: auth.loginid,
+        deriv_currency: auth.currency,
+      }).eq("id", user.id);
+      setSavedToken(token.trim());
+      toast.success(`Connected: ${auth.loginid} (${auth.currency})`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to authorize");
+    } finally {
+      client.close();
+      setTesting(false);
+    }
+  }
+
+  async function clearToken() {
+    if (!user) return;
+    await supabase.from("profiles").update({ deriv_api_token: null, deriv_account_id: null, deriv_currency: null }).eq("id", user.id);
+    setSavedToken(null); setToken(""); setAccountInfo(null);
+    toast.success("Token removed.");
+  }
 
   return (
     <>
       <PageHeader title="Settings" subtitle="Defaults for new trading sessions." />
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <Panel className="lg:col-span-2">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-display text-lg font-semibold">Deriv connection</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Paste your <strong>DEMO</strong> account API token. Real-money tokens are rejected.</p>
+            </div>
+            {savedToken && <span className="flex items-center gap-1 rounded-full bg-up/15 px-2 py-1 text-[10px] font-mono uppercase tracking-widest text-up"><ShieldCheck className="h-3 w-3" /> Connected</span>}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Deriv API token (read + trade scopes)"
+              className="input"
+              autoComplete="off"
+            />
+            <div className="flex gap-2">
+              <button onClick={saveAndTest} disabled={testing} className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                {testing ? <Loader2 className="inline h-4 w-4 animate-spin" /> : savedToken ? "Update & verify" : "Connect"}
+              </button>
+              {savedToken && <button onClick={clearToken} className="rounded-full border border-border px-3 py-2 text-sm">Disconnect</button>}
+            </div>
+          </div>
+          {accountInfo && (
+            <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-border bg-surface/40 p-3 text-xs">
+              <div><div className="font-mono text-[10px] uppercase text-muted-foreground">Account</div><div className="font-semibold tabular">{accountInfo.loginid}</div></div>
+              <div><div className="font-mono text-[10px] uppercase text-muted-foreground">Balance</div><div className="font-semibold tabular">{accountInfo.balance.toFixed(2)} {accountInfo.currency}</div></div>
+              <div><div className="font-mono text-[10px] uppercase text-muted-foreground">Type</div><div className="font-semibold text-up">DEMO</div></div>
+            </div>
+          )}
+          <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+            Get a token from Deriv <ExternalLink className="h-3 w-3" />
+          </a>
+          <p className="mt-1 text-[11px] text-muted-foreground">Required scopes: <code>read</code>, <code>trade</code>. Switch to a Virtual account before generating the token.</p>
+        </Panel>
+
         <Panel>
           <h3 className="font-display text-lg font-semibold">Risk</h3>
           <div className="mt-4 grid grid-cols-2 gap-3">

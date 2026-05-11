@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSession } from "@/lib/store";
 import { PageHeader, StatCard, Panel } from "@/components/app-shell";
-import { fmtMoney, fmtPct, MARKETS } from "@/lib/trading";
+import { fmtMoney, fmtPct } from "@/lib/trading";
+import { DERIV_MARKETS } from "@/lib/deriv";
 import { ArrowUpRight, Activity, TrendingUp, Timer } from "lucide-react";
 import { useMemo } from "react";
 
@@ -12,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function Dashboard() {
   const s = useSession();
-  const market = MARKETS.find((m) => m.id === s.config.market);
+  const market = DERIV_MARKETS.find((m) => m.symbol === s.config.market);
   const winRate = s.trades.length ? (s.wins / s.trades.length) * 100 : 0;
   const roi = s.startingBalance ? (s.pnl / s.startingBalance) * 100 : 0;
   const elapsed = useMemo(() => {

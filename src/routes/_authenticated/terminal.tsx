@@ -1,48 +1,130 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel, StatCard } from "@/components/app-shell";
-import { MARKETS, STRATEGIES, simulateTrade, nextStake, totalExposure, fmtMoney, type Direction } from "@/lib/trading";
-import { Play, Pause, Square, TrendingUp, TrendingDown, Zap } from "lucide-react";
+import { CandleChart, type Candle } from "@/components/candle-chart";
+import { STRATEGIES, nextStake, totalExposure, fmtMoney, type Direction } from "@/lib/trading";
+import { DerivClient, DERIV_MARKETS, GRANULARITIES } from "@/lib/deriv";
+import { Play, Square, TrendingUp, TrendingDown, Zap, Wifi, WifiOff, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { Link } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_authenticated/terminal")({
   head: () => ({ meta: [{ title: "Terminal — Tickwise" }] }),
   component: Terminal,
 });
 
+type Tab = "chart" | "trade" | "ladder" | "log";
+
 function Terminal() {
   const s = useSession();
   const { user } = useAuth();
   const sessionDbId = useRef<string | null>(null);
-  const market = MARKETS.find((m) => m.id === s.config.market) ?? MARKETS[0];
-  const strategy = STRATEGIES.find((x) => x.id === s.config.strategy) ?? STRATEGIES[0];
-  const direction: Direction = strategy.direction;
+  const clientRef = useRef<DerivClient | null>(null);
+  const tradingRef = useRef(false); // mutex to avoid overlapping trades in auto mode
 
-  // Live price ticker for the active market
-  useEffect(() => {
-    if (s.status !== "running") return;
-    const i = setInterval(() => {
-      useSession.setState((prev) => ({ price: prev.price * (1 + (Math.random() - 0.5) * market.vol) }));
-    }, 350);
-    return () => clearInterval(i);
-  }, [s.status, market.vol]);
+  const [tab, setTab] = useState<Tab>("chart");
+  const [token, setToken] = useState<string | null>(null);
+  const [tokenChecked, setTokenChecked] = useState(false);
+  const [granularity, setGranularity] = useState(60);
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [lastQuote, setLastQuote] = useState<number | null>(null);
+  const [connState, setConnState] = useState<"idle" | "connecting" | "connected" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
 
-  // Auto-trader loop
+  // Load saved token
   useEffect(() => {
-    if (!s.config.autoTrade || s.status !== "running") return;
-    const i = setInterval(() => {
-      placeTrade(direction);
-    }, Math.max(1500, s.config.cooldownSeconds * 1000));
-    return () => clearInterval(i);
-  }, [s.config.autoTrade, s.config.cooldownSeconds, s.status, direction]);
+    if (!user) return;
+    supabase.from("profiles").select("deriv_api_token, deriv_account_id, deriv_currency").eq("id", user.id).maybeSingle().then(({ data }) => {
+      setToken(data?.deriv_api_token ?? null);
+      if (data?.deriv_account_id) useSession.setState({ derivAccountId: data.deriv_account_id, derivCurrency: data.deriv_currency || "USD" });
+      setTokenChecked(true);
+    });
+  }, [user]);
+
+  // Connect to Deriv when we have a token
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const c = new DerivClient();
+    clientRef.current = c;
+    c.onClose = () => setConnState("error");
+    c.onBalance = ({ balance, currency }) =>
+      useSession.setState({ derivLiveBalance: balance, derivCurrency: currency });
+    setConnState("connecting");
+    (async () => {
+      try {
+        await c.connect();
+        const auth = await c.authorize(token);
+        if (cancelled) return;
+        if (!auth.is_virtual) {
+          setError("Token is for a REAL account. Use a DEMO token.");
+          setConnState("error");
+          return;
+        }
+        useSession.setState({
+          derivConnected: true, derivAuthorized: true,
+          derivAccountId: auth.loginid, derivCurrency: auth.currency,
+          derivLiveBalance: Number(auth.balance),
+        });
+        setConnState("connected");
+      } catch (e: any) {
+        setError(e?.message ?? "Connection failed");
+        setConnState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      c.close();
+      clientRef.current = null;
+      useSession.setState({ derivConnected: false, derivAuthorized: false });
+    };
+  }, [token]);
+
+  // Subscribe to ticks + candles when symbol/granularity changes
+  useEffect(() => {
+    const c = clientRef.current;
+    if (!c || connState !== "connected") return;
+    const sym = s.config.market;
+    setCandles([]);
+    let mounted = true;
+    (async () => {
+      try {
+        await c.unsubscribeTicks(sym);
+        await c.unsubscribeCandles(sym);
+        await c.subscribeTicks(sym, (t) => {
+          if (!mounted) return;
+          setLastQuote(t.quote);
+          useSession.setState({ price: t.quote });
+        });
+        await c.subscribeCandles(sym, granularity, 200, (candle, isInitial) => {
+          if (!mounted) return;
+          setCandles((prev) => {
+            if (isInitial) {
+              // batch initial loads
+              const map = new Map(prev.map((p) => [p.epoch, p]));
+              map.set(candle.epoch, candle);
+              return Array.from(map.values()).sort((a, b) => a.epoch - b.epoch);
+            }
+            const idx = prev.findIndex((p) => p.epoch === candle.epoch);
+            if (idx >= 0) { const next = prev.slice(); next[idx] = candle; return next; }
+            return [...prev, candle].slice(-300);
+          });
+        });
+      } catch (e: any) {
+        toast.error(e?.message ?? "Stream error");
+      }
+    })();
+    return () => { mounted = false; };
+  }, [s.config.market, granularity, connState]);
 
   async function start() {
-    s.startSession(s.startingBalance || 1000);
+    if (connState !== "connected") return toast.error("Connect your Deriv token in Settings first.");
+    s.startSession(s.derivLiveBalance ?? s.startingBalance ?? 1000);
     if (user) {
-      const { data, error } = await supabase.from("trading_sessions").insert({
+      const { data, error: dbErr } = await supabase.from("trading_sessions").insert({
         user_id: user.id,
         market: s.config.market,
         strategy: s.config.strategy,
@@ -55,255 +137,352 @@ function Terminal() {
         stop_loss: s.config.stopLoss,
         max_trades: s.config.maxTrades,
         cooldown_seconds: s.config.cooldownSeconds,
-        starting_balance: s.startingBalance || 1000,
+        starting_balance: s.derivLiveBalance ?? 1000,
         settings: s.config,
       }).select("id").single();
-      if (!error && data) sessionDbId.current = data.id;
+      if (!dbErr && data) sessionDbId.current = data.id;
     }
     toast.success("Session started.");
+    setTab("trade");
   }
 
-  async function endSession() {
+  const endSession = useCallback(async () => {
     s.endSession();
     if (sessionDbId.current && user) {
       await supabase.from("trading_sessions").update({
         status: "ended",
         ended_at: new Date().toISOString(),
-        ending_balance: s.balance,
-        total_trades: s.trades.length,
-        wins: s.wins,
-        losses: s.losses,
-        pnl: s.pnl,
+        ending_balance: useSession.getState().balance,
+        total_trades: useSession.getState().trades.length,
+        wins: useSession.getState().wins,
+        losses: useSession.getState().losses,
+        pnl: useSession.getState().pnl,
       }).eq("id", sessionDbId.current);
+      sessionDbId.current = null;
     }
     toast.success("Session saved.");
-  }
+  }, [s, user]);
 
-  function placeTrade(direction: Direction) {
-    if (s.status !== "running") return toast.error("Start a session first.");
-    if (s.config.maxTrades && s.trades.length >= s.config.maxTrades) {
-      toast.warning("Max trades reached."); s.endSession(); return;
-    }
-    if (s.config.takeProfit && s.pnl >= s.config.takeProfit) {
-      toast.success("Take-profit hit. Session ended."); endSession(); return;
-    }
-    if (s.config.stopLoss && s.pnl <= -s.config.stopLoss) {
-      toast.error("Stop-loss hit. Session ended."); endSession(); return;
-    }
-    const stake = s.nextStake;
-    const entry = s.price;
-    const result = simulateTrade({
-      entry, ticks: s.config.durationTicks, vol: market.vol,
-      direction, stake,
-    });
-    s.recordTrade({
-      direction, stake, pnl: result.pnl, result: result.result,
-      entry, exit: result.exit, level: s.currentLevel,
-    });
-    useSession.setState({ price: result.exit });
+  const placeTrade = useCallback(async (direction: Direction) => {
+    const cur = useSession.getState();
+    if (cur.status !== "running") return toast.error("Start a session first.");
+    if (!clientRef.current) return toast.error("Not connected.");
+    if (tradingRef.current) return; // already trading
 
-    // martingale next
-    const ms = nextStake({
-      baseStake: s.config.baseStake,
-      multiplier: s.config.martingaleMultiplier,
-      lastResult: result.result,
-      currentLevel: s.currentLevel,
-      maxLevels: s.config.maxMartingaleLevels,
-      resetOnWin: s.config.resetOnWin,
-    });
-    s.setNextStake(s.config.martingaleEnabled ? ms.stake : s.config.baseStake, s.config.martingaleEnabled ? ms.level : 0);
-
-    // persist trade
-    if (sessionDbId.current && user) {
-      supabase.from("trades").insert({
-        session_id: sessionDbId.current,
-        user_id: user.id,
-        direction, stake, pnl: result.pnl, payout: result.payout,
-        result: result.result, martingale_level: s.currentLevel,
-        entry_price: entry, exit_price: result.exit, duration_ticks: s.config.durationTicks,
-      }).then(() => {});
+    // Guardrails
+    if (cur.config.maxTrades && cur.trades.length >= cur.config.maxTrades) {
+      toast.warning("Max trades reached."); endSession(); return;
     }
+    if (cur.config.takeProfit && cur.pnl >= cur.config.takeProfit) {
+      toast.success("Take-profit hit."); endSession(); return;
+    }
+    if (cur.config.stopLoss && cur.pnl <= -cur.config.stopLoss) {
+      toast.error("Stop-loss hit."); endSession(); return;
+    }
+
+    tradingRef.current = true;
+    const stake = Number(cur.nextStake.toFixed(2));
+    const entry = cur.price;
+
+    try {
+      const { buy } = await clientRef.current.buyOnlyUpsDowns({
+        symbol: cur.config.market,
+        direction,
+        stake,
+        ticks: cur.config.durationTicks,
+        currency: cur.derivCurrency,
+      });
+      // Watch contract until settlement
+      const final = await clientRef.current.watchContract(buy.contract_id);
+      const result: "win" | "loss" = final.status === "won" ? "win" : "loss";
+      const profit = Number(final.profit ?? (result === "win" ? buy.payout - stake : -stake));
+      const exitPrice = Number(final.exit_tick ?? cur.price);
+
+      s.recordTrade({ direction, stake, pnl: profit, result, entry, exit: exitPrice, level: cur.currentLevel });
+
+      // Martingale
+      const ms = nextStake({
+        baseStake: cur.config.baseStake,
+        multiplier: cur.config.martingaleMultiplier,
+        lastResult: result,
+        currentLevel: cur.currentLevel,
+        maxLevels: cur.config.maxMartingaleLevels,
+        resetOnWin: cur.config.resetOnWin,
+      });
+      s.setNextStake(cur.config.martingaleEnabled ? ms.stake : cur.config.baseStake, cur.config.martingaleEnabled ? ms.level : 0);
+
+      if (sessionDbId.current && user) {
+        supabase.from("trades").insert({
+          session_id: sessionDbId.current, user_id: user.id,
+          direction, stake, pnl: profit, payout: Number(final.payout ?? buy.payout ?? 0),
+          result, martingale_level: cur.currentLevel,
+          entry_price: entry, exit_price: exitPrice, duration_ticks: cur.config.durationTicks,
+        }).then(() => {});
+      }
+      if (result === "win") toast.success(`WIN +${fmtMoney(profit, cur.derivCurrency + " ")}`);
+      else toast.error(`LOSS ${fmtMoney(profit, cur.derivCurrency + " ")}`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Trade failed");
+    } finally {
+      tradingRef.current = false;
+    }
+  }, [endSession, s, user]);
+
+  // Auto-trade loop — kicks off as soon as previous trade settles
+  useEffect(() => {
+    if (!s.config.autoTrade || s.status !== "running") return;
+    let cancelled = false;
+    const loop = async () => {
+      while (!cancelled) {
+        const cur = useSession.getState();
+        if (cur.status !== "running" || !cur.config.autoTrade) break;
+        const dir = STRATEGIES.find(x => x.id === cur.config.strategy)!.direction;
+        await placeTrade(dir);
+        await new Promise(r => setTimeout(r, Math.max(500, cur.config.cooldownSeconds * 1000)));
+      }
+    };
+    loop();
+    return () => { cancelled = true; };
+  }, [s.config.autoTrade, s.status, placeTrade]);
+
+  const strategy = STRATEGIES.find((x) => x.id === s.config.strategy)!;
+  const market = DERIV_MARKETS.find((m) => m.symbol === s.config.market) ?? DERIV_MARKETS[2];
+  const winRate = s.trades.length ? ((s.wins / s.trades.length) * 100).toFixed(1) : "0.0";
+  const pnlPct = s.startingBalance ? ((s.pnl / s.startingBalance) * 100) : 0;
+
+  // Token gate
+  if (tokenChecked && !token) {
+    return (
+      <>
+        <PageHeader title="Terminal" />
+        <Panel className="text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-warn" />
+          <h2 className="mt-3 font-display text-xl font-semibold">Connect your Deriv account</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Add your Deriv DEMO API token to start trading.</p>
+          <Link to="/settings" className="mt-4 inline-block rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground">Go to Settings</Link>
+        </Panel>
+      </>
+    );
   }
 
   return (
     <>
-      <PageHeader
-        title="Trade Terminal"
-        subtitle={`${market.name} · live`}
-        action={
-          <div className="hidden gap-2 md:flex">
-            {s.status === "idle" || s.status === "ended" ? (
-              <button onClick={start} className="rounded-full bg-up px-4 py-2 text-sm font-semibold text-up-foreground">
-                <Play className="-mt-0.5 mr-1 inline h-4 w-4" /> Start session
-              </button>
-            ) : s.status === "running" ? (
-              <>
-                <button onClick={() => s.pauseSession()} className="rounded-full border border-border px-4 py-2 text-sm">
-                  <Pause className="-mt-0.5 mr-1 inline h-4 w-4" /> Pause
-                </button>
-                <button onClick={endSession} className="rounded-full bg-down px-4 py-2 text-sm font-semibold text-down-foreground">
-                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> End
-                </button>
-              </>
-            ) : (
-              <button onClick={() => s.resumeSession()} className="rounded-full bg-up px-4 py-2 text-sm font-semibold text-up-foreground">
-                <Play className="-mt-0.5 mr-1 inline h-4 w-4" /> Resume
-              </button>
-            )}
-          </div>
-        }
-      />
+      {/* Top status strip */}
+      <div className="-mx-4 mb-3 flex items-center gap-2 overflow-x-auto border-b border-border bg-surface/40 px-4 py-2 text-[11px] no-scrollbar md:mx-0 md:rounded-xl md:border">
+        <ConnPill state={connState} />
+        <span className="font-mono uppercase tracking-widest text-muted-foreground">{market.name}</span>
+        <span className="ml-auto flex items-center gap-3">
+          <span className="font-mono text-muted-foreground">Bal</span>
+          <span className="font-display tabular text-foreground">{s.derivLiveBalance != null ? `${s.derivLiveBalance.toFixed(2)} ${s.derivCurrency}` : "—"}</span>
+          {s.derivAccountId && <span className="rounded-full bg-up/15 px-2 py-0.5 font-mono uppercase text-up">{s.derivAccountId}</span>}
+        </span>
+      </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-        {/* Live panel */}
-        <Panel className="relative overflow-hidden">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Spot</div>
-              <div className="mt-1 font-display text-4xl tabular md:text-5xl">{s.price.toFixed(2)}</div>
+      {error && (
+        <div className="mb-3 rounded-xl border border-down/30 bg-down/10 px-3 py-2 text-xs text-down">{error}</div>
+      )}
+
+      {/* Tabs */}
+      <div className="mb-3 flex gap-1 rounded-xl bg-surface/40 p-1 text-xs font-medium">
+        {(["chart", "trade", "ladder", "log"] as Tab[]).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded-lg px-3 py-2 uppercase tracking-widest transition-colors ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <MiniStat label="Spot" value={lastQuote != null ? lastQuote.toFixed(4) : "—"} />
+        <MiniStat label="P&L" value={fmtMoney(s.pnl, s.derivCurrency + " ")} accent={s.pnl >= 0 ? "up" : "down"} sub={`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`} />
+        <MiniStat label="Win rate" value={`${winRate}%`} sub={`${s.wins}W / ${s.losses}L`} />
+        <MiniStat label="Next stake" value={fmtMoney(s.nextStake, s.derivCurrency + " ")} sub={`L${s.currentLevel}`} accent="primary" />
+      </div>
+
+      {tab === "chart" && (
+        <Panel className="!p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <select value={s.config.market} onChange={(e) => s.setConfig({ market: e.target.value })} className="select-base !w-auto">
+              {DERIV_MARKETS.map((m) => <option key={m.symbol} value={m.symbol}>{m.name}</option>)}
+            </select>
+            <div className="ml-auto flex gap-1">
+              {GRANULARITIES.map((g) => (
+                <button key={g.v} onClick={() => setGranularity(g.v)} className={`rounded-md px-2 py-1 font-mono text-[10px] uppercase ${granularity === g.v ? "bg-primary text-primary-foreground" : "bg-surface text-muted-foreground"}`}>{g.label}</button>
+              ))}
             </div>
-            <div className="text-right">
-              <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Next stake</div>
-              <div className="mt-1 font-display text-2xl text-primary tabular">{fmtMoney(s.nextStake)}</div>
-              <div className="text-xs text-muted-foreground">L{s.currentLevel} · exp {fmtMoney(totalExposure(s.config.baseStake, s.config.martingaleMultiplier, s.config.maxMartingaleLevels))}</div>
-            </div>
           </div>
-
-          <Sparkline trades={s.trades} className="mt-4 h-24 w-full" />
-
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <button
-              onClick={() => { s.setConfig({ strategy: "only_ups" }); placeTrade("up"); }}
-              className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-5 text-base font-bold transition-transform active:scale-[0.98] ${
-                s.config.strategy === "only_ups"
-                  ? "bg-up text-up-foreground ring-2 ring-up/40"
-                  : "bg-up/80 text-up-foreground"
-              }`}
-            >
-              <div className="flex items-center gap-2"><TrendingUp className="h-5 w-5" /> ONLY UPS</div>
-              <div className="text-[10px] font-mono uppercase tracking-widest opacity-80">{s.config.durationTicks} ticks · all rising</div>
-            </button>
-            <button
-              onClick={() => { s.setConfig({ strategy: "only_downs" }); placeTrade("down"); }}
-              className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-5 text-base font-bold transition-transform active:scale-[0.98] ${
-                s.config.strategy === "only_downs"
-                  ? "bg-down text-down-foreground ring-2 ring-down/40"
-                  : "bg-down/80 text-down-foreground"
-              }`}
-            >
-              <div className="flex items-center gap-2"><TrendingDown className="h-5 w-5" /> ONLY DOWNS</div>
-              <div className="text-[10px] font-mono uppercase tracking-widest opacity-80">{s.config.durationTicks} ticks · all falling</div>
-            </button>
-          </div>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
-
-          {/* Mobile session controls */}
-          <div className="mt-3 grid grid-cols-2 gap-2 md:hidden">
-            {s.status === "idle" || s.status === "ended" ? (
-              <button onClick={start} className="col-span-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground">
-                Start session
-              </button>
-            ) : s.status === "running" ? (
-              <>
-                <button onClick={() => s.pauseSession()} className="rounded-full border border-border px-4 py-2.5 text-sm">Pause</button>
-                <button onClick={endSession} className="rounded-full bg-down px-4 py-2.5 text-sm font-semibold text-down-foreground">End session</button>
-              </>
-            ) : (
-              <button onClick={() => s.resumeSession()} className="col-span-2 rounded-full bg-up px-4 py-2.5 text-sm font-semibold text-up-foreground">Resume</button>
-            )}
-          </div>
+          {candles.length === 0 ? (
+            <div className="grid h-[320px] place-items-center text-xs text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Streaming candles…</div>
+          ) : (
+            <CandleChart candles={candles} height={340} />
+          )}
         </Panel>
+      )}
 
-        {/* Settings panel */}
-        <Panel>
-          <h3 className="font-display text-lg font-semibold">Trade controls</h3>
-          <div className="mt-4 space-y-4">
-            <Row label="Market">
-              <select value={s.config.market} onChange={(e) => s.setConfig({ market: e.target.value })} className="select-base">
-                {MARKETS.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </Row>
-            <Row label="Strategy">
-              <select value={s.config.strategy} onChange={(e) => s.setConfig({ strategy: e.target.value as any })} className="select-base">
-                {STRATEGIES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </Row>
+      {tab === "trade" && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Panel>
             <div className="grid grid-cols-2 gap-3">
-              <Row label="Base stake">
-                <input type="number" min={0.1} step={0.1} value={s.config.baseStake} onChange={(e) => s.setConfig({ baseStake: +e.target.value })} className="select-base" />
-              </Row>
-              <Row label="Duration (ticks)">
-                <input type="number" min={1} max={30} value={s.config.durationTicks} onChange={(e) => s.setConfig({ durationTicks: +e.target.value })} className="select-base" />
-              </Row>
+              <button
+                disabled={tradingRef.current || s.status !== "running"}
+                onClick={() => { s.setConfig({ strategy: "only_ups" }); placeTrade("up"); }}
+                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-up py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50"
+              >
+                <TrendingUp className="h-6 w-6" />
+                <span className="text-base font-bold">ONLY UPS</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all rising</span>
+              </button>
+              <button
+                disabled={tradingRef.current || s.status !== "running"}
+                onClick={() => { s.setConfig({ strategy: "only_downs" }); placeTrade("down"); }}
+                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-down py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50"
+              >
+                <TrendingDown className="h-6 w-6" />
+                <span className="text-base font-bold">ONLY DOWNS</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all falling</span>
+              </button>
             </div>
+            <p className="mt-3 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
 
-            <div className="rounded-xl border border-border p-3">
-              <label className="flex cursor-pointer items-center justify-between">
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {s.status !== "running" ? (
+                <button onClick={start} className="col-span-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">
+                  <Play className="-mt-0.5 mr-1 inline h-4 w-4" /> Start session
+                </button>
+              ) : (
+                <button onClick={endSession} className="col-span-2 rounded-full bg-down px-4 py-3 text-sm font-semibold text-down-foreground">
+                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> End session
+                </button>
+              )}
+            </div>
+          </Panel>
+
+          <Panel>
+            <h3 className="font-display text-base font-semibold">Trade controls</h3>
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Stake">
+                  <input type="number" min={0.35} step={0.1} value={s.config.baseStake} onChange={(e) => s.setConfig({ baseStake: +e.target.value })} className="select-base" />
+                </Field>
+                <Field label="Ticks">
+                  <input type="number" min={5} max={10} value={s.config.durationTicks} onChange={(e) => s.setConfig({ durationTicks: Math.max(5, Math.min(10, +e.target.value)) })} className="select-base" />
+                </Field>
+              </div>
+              <label className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
                 <div className="flex items-center gap-2"><Zap className="h-4 w-4 text-primary" /><span className="text-sm font-medium">Martingale</span></div>
                 <input type="checkbox" checked={s.config.martingaleEnabled} onChange={(e) => s.setConfig({ martingaleEnabled: e.target.checked })} className="h-4 w-4 accent-primary" />
               </label>
               {s.config.martingaleEnabled && (
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <Row label="Multiplier">
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Multiplier">
                     <input type="number" step={0.1} min={1.1} value={s.config.martingaleMultiplier} onChange={(e) => s.setConfig({ martingaleMultiplier: +e.target.value })} className="select-base" />
-                  </Row>
-                  <Row label="Max levels">
+                  </Field>
+                  <Field label="Max levels">
                     <input type="number" min={1} max={15} value={s.config.maxMartingaleLevels} onChange={(e) => s.setConfig({ maxMartingaleLevels: +e.target.value })} className="select-base" />
-                  </Row>
+                  </Field>
                 </div>
               )}
-            </div>
-
-            <Row label="Auto-trade">
-              <label className="flex items-center justify-between rounded-xl border border-border px-3 py-2">
-                <span className="text-xs text-muted-foreground">Cycle automatically · {s.config.cooldownSeconds}s</span>
+              <label className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
+                <div><span className="text-sm font-medium">Auto-trade</span><div className="text-[10px] text-muted-foreground">{s.config.cooldownSeconds}s between trades</div></div>
                 <input type="checkbox" checked={s.config.autoTrade} onChange={(e) => s.setConfig({ autoTrade: e.target.checked })} className="h-4 w-4 accent-primary" />
               </label>
-            </Row>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {tab === "ladder" && (
+        <Panel>
+          <h3 className="font-display text-base font-semibold">Martingale ladder</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Stake at each loss-recovery step from your base.</p>
+          <div className="mt-3 overflow-hidden rounded-xl border border-border">
+            <table className="w-full text-xs tabular">
+              <thead className="bg-surface/60 text-[10px] uppercase tracking-widest text-muted-foreground">
+                <tr><th className="px-3 py-2 text-left">Lvl</th><th className="px-3 py-2 text-left">Stake</th><th className="px-3 py-2 text-left">Cum. risk</th><th className="px-3 py-2 text-left">Recovery if win</th></tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: s.config.maxMartingaleLevels + 1 }).map((_, i) => {
+                  const stake = s.config.baseStake * Math.pow(s.config.martingaleMultiplier, i);
+                  const cum = totalExposure(s.config.baseStake, s.config.martingaleMultiplier, i);
+                  return (
+                    <tr key={i} className={`border-t border-border ${i === s.currentLevel && s.status === "running" ? "bg-primary/10" : ""}`}>
+                      <td className="px-3 py-2 font-mono">L{i}</td>
+                      <td className="px-3 py-2">{fmtMoney(stake, s.derivCurrency + " ")}</td>
+                      <td className="px-3 py-2 text-down">-{fmtMoney(cum, s.derivCurrency + " ").replace("-", "")}</td>
+                      <td className="px-3 py-2 text-up">net ≈ {fmtMoney(stake * 0.85 - (cum - stake), s.derivCurrency + " ")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+            <StatCard label="Current level" value={`L${s.currentLevel}`} accent="primary" />
+            <StatCard label="Total exposure" value={fmtMoney(totalExposure(s.config.baseStake, s.config.martingaleMultiplier, s.config.maxMartingaleLevels), s.derivCurrency + " ")} accent="down" />
+            <StatCard label="Streak" value={`${s.consecutiveLosses}L / ${s.consecutiveWins}W`} />
           </div>
         </Panel>
-      </div>
+      )}
 
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Balance" value={fmtMoney(s.balance)} />
-        <StatCard label="Session P&L" value={fmtMoney(s.pnl)} accent={s.pnl >= 0 ? "up" : "down"} />
-        <StatCard label="Win rate" value={`${s.trades.length ? ((s.wins / s.trades.length) * 100).toFixed(1) : "0.0"}%`} />
-        <StatCard label="Trades" value={`${s.trades.length}${s.config.maxTrades ? ` / ${s.config.maxTrades}` : ""}`} />
-      </div>
+      {tab === "log" && (
+        <Panel className="!p-0">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="font-display text-base font-semibold">Trade log</h3>
+            <p className="text-[11px] text-muted-foreground">Newest first · session only</p>
+          </div>
+          <div className="max-h-[60svh] overflow-y-auto">
+            {s.trades.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-muted-foreground">No trades yet.</div>
+            ) : (
+              <table className="w-full text-xs tabular">
+                <thead className="sticky top-0 bg-surface/95 text-[10px] uppercase tracking-widest text-muted-foreground backdrop-blur">
+                  <tr><th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Dir</th><th className="px-3 py-2 text-right">Stake</th><th className="px-3 py-2 text-right">Lvl</th><th className="px-3 py-2 text-right">P&L</th></tr>
+                </thead>
+                <tbody>
+                  {s.trades.map((t) => (
+                    <tr key={t.id} className="border-t border-border">
+                      <td className="px-3 py-2 text-muted-foreground">{new Date(t.ts).toLocaleTimeString()}</td>
+                      <td className="px-3 py-2"><span className={t.direction === "up" ? "text-up" : "text-down"}>{t.direction === "up" ? "▲ UP" : "▼ DN"}</span></td>
+                      <td className="px-3 py-2 text-right">{t.stake.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right font-mono">L{t.level}</td>
+                      <td className={`px-3 py-2 text-right font-semibold ${t.pnl >= 0 ? "text-up" : "text-down"}`}>{t.pnl >= 0 ? "+" : ""}{t.pnl.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Panel>
+      )}
 
       <style>{`.select-base{width:100%;background:var(--input);border:1px solid var(--border);border-radius:.65rem;padding:.55rem .7rem;font-size:.85rem;color:var(--foreground);outline:none}.select-base:focus{border-color:var(--primary)}`}</style>
     </>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function ConnPill({ state }: { state: "idle" | "connecting" | "connected" | "error" }) {
+  if (state === "connected") return <span className="flex items-center gap-1 rounded-full bg-up/15 px-2 py-0.5 font-mono uppercase tracking-widest text-up"><Wifi className="h-3 w-3" /> live</span>;
+  if (state === "connecting") return <span className="flex items-center gap-1 rounded-full bg-warn/15 px-2 py-0.5 font-mono uppercase tracking-widest text-warn"><Loader2 className="h-3 w-3 animate-spin" /> connecting</span>;
+  if (state === "error") return <span className="flex items-center gap-1 rounded-full bg-down/15 px-2 py-0.5 font-mono uppercase tracking-widest text-down"><WifiOff className="h-3 w-3" /> offline</span>;
+  return <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-mono uppercase tracking-widest text-muted-foreground">idle</span>;
+}
+
+function MiniStat({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: "up" | "down" | "primary" }) {
+  const cls = accent === "up" ? "text-up" : accent === "down" ? "text-down" : accent === "primary" ? "text-primary" : "";
   return (
-    <div>
-      <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      {children}
+    <div className="rounded-xl border border-border bg-surface/40 p-2.5">
+      <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 font-display text-base tabular ${cls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground tabular">{sub}</div>}
     </div>
   );
 }
 
-function Sparkline({ trades, className }: { trades: { pnl: number }[]; className?: string }) {
-  if (trades.length < 2) {
-    return <div className={`${className} grid place-items-center rounded-xl bg-surface/40 text-xs text-muted-foreground`}>No data yet — place a trade</div>;
-  }
-  const series = [...trades].reverse().reduce<number[]>((acc, t) => {
-    acc.push((acc[acc.length - 1] ?? 0) + t.pnl);
-    return acc;
-  }, [0]);
-  const min = Math.min(...series), max = Math.max(...series);
-  const range = max - min || 1;
-  const points = series.map((v, i) => {
-    const x = (i / (series.length - 1)) * 100;
-    const y = 100 - ((v - min) / range) * 100;
-    return `${x},${y}`;
-  }).join(" ");
-  const last = series[series.length - 1];
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className={className}>
-      <polyline points={points} fill="none" stroke={last >= 0 ? "var(--up)" : "var(--down)"} strokeWidth="1.5" />
-    </svg>
+    <label className="block">
+      <span className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{label}</span>
+      {children}
+    </label>
   );
 }
