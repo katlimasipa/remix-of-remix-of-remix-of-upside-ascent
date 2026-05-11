@@ -52,7 +52,7 @@ export type SessionState = {
 
 export const defaultConfig: SessionConfig = {
   market: "VOL_50",
-  strategy: "rise_fall",
+  strategy: "only_ups",
   baseStake: 1,
   durationTicks: 5,
   martingaleEnabled: true,
