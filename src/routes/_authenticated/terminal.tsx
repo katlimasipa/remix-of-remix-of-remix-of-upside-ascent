@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel, StatCard } from "@/components/app-shell";
 import { CandleChart, type Candle } from "@/components/candle-chart";
