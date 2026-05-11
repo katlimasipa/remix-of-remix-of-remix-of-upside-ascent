@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel, StatCard } from "@/components/app-shell";
 import { MARKETS, STRATEGIES, simulateTrade, nextStake, totalExposure, fmtMoney, type Direction } from "@/lib/trading";
-import { Play, Pause, Square, ArrowUpRight, ArrowDownRight, Zap } from "lucide-react";
+import { Play, Pause, Square, TrendingUp, TrendingDown, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -18,6 +18,8 @@ function Terminal() {
   const { user } = useAuth();
   const sessionDbId = useRef<string | null>(null);
   const market = MARKETS.find((m) => m.id === s.config.market) ?? MARKETS[0];
+  const strategy = STRATEGIES.find((x) => x.id === s.config.strategy) ?? STRATEGIES[0];
+  const direction: Direction = strategy.direction;
 
   // Live price ticker for the active market
   useEffect(() => {
@@ -32,10 +34,10 @@ function Terminal() {
   useEffect(() => {
     if (!s.config.autoTrade || s.status !== "running") return;
     const i = setInterval(() => {
-      placeTrade(Math.random() > 0.5 ? "up" : "down");
+      placeTrade(direction);
     }, Math.max(1500, s.config.cooldownSeconds * 1000));
     return () => clearInterval(i);
-  }, [s.config.autoTrade, s.config.cooldownSeconds, s.status]);
+  }, [s.config.autoTrade, s.config.cooldownSeconds, s.status, direction]);
 
   async function start() {
     s.startSession(s.startingBalance || 1000);
@@ -171,18 +173,29 @@ function Terminal() {
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
-              onClick={() => placeTrade("up")}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-up py-5 text-base font-bold text-up-foreground transition-transform active:scale-[0.98]"
+              onClick={() => { s.setConfig({ strategy: "only_ups" }); placeTrade("up"); }}
+              className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-5 text-base font-bold transition-transform active:scale-[0.98] ${
+                s.config.strategy === "only_ups"
+                  ? "bg-up text-up-foreground ring-2 ring-up/40"
+                  : "bg-up/80 text-up-foreground"
+              }`}
             >
-              <ArrowUpRight className="h-5 w-5" /> UP
+              <div className="flex items-center gap-2"><TrendingUp className="h-5 w-5" /> ONLY UPS</div>
+              <div className="text-[10px] font-mono uppercase tracking-widest opacity-80">{s.config.durationTicks} ticks · all rising</div>
             </button>
             <button
-              onClick={() => placeTrade("down")}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-down py-5 text-base font-bold text-down-foreground transition-transform active:scale-[0.98]"
+              onClick={() => { s.setConfig({ strategy: "only_downs" }); placeTrade("down"); }}
+              className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-5 text-base font-bold transition-transform active:scale-[0.98] ${
+                s.config.strategy === "only_downs"
+                  ? "bg-down text-down-foreground ring-2 ring-down/40"
+                  : "bg-down/80 text-down-foreground"
+              }`}
             >
-              <ArrowDownRight className="h-5 w-5" /> DOWN
+              <div className="flex items-center gap-2"><TrendingDown className="h-5 w-5" /> ONLY DOWNS</div>
+              <div className="text-[10px] font-mono uppercase tracking-widest opacity-80">{s.config.durationTicks} ticks · all falling</div>
             </button>
           </div>
+          <p className="mt-2 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
 
           {/* Mobile session controls */}
           <div className="mt-3 grid grid-cols-2 gap-2 md:hidden">
