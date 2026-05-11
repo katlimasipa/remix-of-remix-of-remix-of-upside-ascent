@@ -14,7 +14,167 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          starting_balance: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id: string
+          starting_balance?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          starting_balance?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          created_at: string
+          direction: string
+          duration_ticks: number
+          entry_price: number
+          exit_price: number
+          id: string
+          martingale_level: number
+          payout: number
+          pnl: number
+          result: string
+          session_id: string
+          stake: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          direction: string
+          duration_ticks: number
+          entry_price: number
+          exit_price: number
+          id?: string
+          martingale_level?: number
+          payout?: number
+          pnl: number
+          result: string
+          session_id: string
+          stake: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          direction?: string
+          duration_ticks?: number
+          entry_price?: number
+          exit_price?: number
+          id?: string
+          martingale_level?: number
+          payout?: number
+          pnl?: number
+          result?: string
+          session_id?: string
+          stake?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trades_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "trading_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trading_sessions: {
+        Row: {
+          base_stake: number
+          cooldown_seconds: number
+          duration_ticks: number
+          ended_at: string | null
+          ending_balance: number | null
+          id: string
+          losses: number
+          market: string
+          martingale_enabled: boolean
+          martingale_multiplier: number
+          max_martingale_levels: number
+          max_trades: number | null
+          name: string | null
+          pnl: number
+          settings: Json
+          started_at: string
+          starting_balance: number
+          status: string
+          stop_loss: number | null
+          strategy: string
+          take_profit: number | null
+          total_trades: number
+          user_id: string
+          wins: number
+        }
+        Insert: {
+          base_stake: number
+          cooldown_seconds?: number
+          duration_ticks?: number
+          ended_at?: string | null
+          ending_balance?: number | null
+          id?: string
+          losses?: number
+          market: string
+          martingale_enabled?: boolean
+          martingale_multiplier?: number
+          max_martingale_levels?: number
+          max_trades?: number | null
+          name?: string | null
+          pnl?: number
+          settings?: Json
+          started_at?: string
+          starting_balance: number
+          status?: string
+          stop_loss?: number | null
+          strategy: string
+          take_profit?: number | null
+          total_trades?: number
+          user_id: string
+          wins?: number
+        }
+        Update: {
+          base_stake?: number
+          cooldown_seconds?: number
+          duration_ticks?: number
+          ended_at?: string | null
+          ending_balance?: number | null
+          id?: string
+          losses?: number
+          market?: string
+          martingale_enabled?: boolean
+          martingale_multiplier?: number
+          max_martingale_levels?: number
+          max_trades?: number | null
+          name?: string | null
+          pnl?: number
+          settings?: Json
+          started_at?: string
+          starting_balance?: number
+          status?: string
+          stop_loss?: number | null
+          strategy?: string
+          take_profit?: number | null
+          total_trades?: number
+          user_id?: string
+          wins?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
