@@ -17,6 +17,9 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          deriv_account_id: string | null
+          deriv_api_token: string | null
+          deriv_currency: string | null
           display_name: string | null
           id: string
           starting_balance: number
@@ -24,6 +27,9 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deriv_account_id?: string | null
+          deriv_api_token?: string | null
+          deriv_currency?: string | null
           display_name?: string | null
           id: string
           starting_balance?: number
@@ -31,6 +37,9 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deriv_account_id?: string | null
+          deriv_api_token?: string | null
+          deriv_currency?: string | null
           display_name?: string | null
           id?: string
           starting_balance?: number
