@@ -1,7 +1,7 @@
 // Simulated tick generator + martingale engine.
 // Pure functions — easy to test, no side effects.
 
-export type Strategy = "rise_fall" | "higher_lower" | "up_down";
+export type Strategy = "only_ups" | "only_downs";
 export type Direction = "up" | "down";
 
 export const MARKETS = [
@@ -14,10 +14,19 @@ export const MARKETS = [
   { id: "CRASH_500", name: "Crash 500", vol: 0.004 },
 ];
 
-export const STRATEGIES: { id: Strategy; label: string; hint: string }[] = [
-  { id: "rise_fall", label: "Rise / Fall", hint: "Predict if final tick rises or falls vs entry." },
-  { id: "higher_lower", label: "Higher / Lower", hint: "Predict if exit price is above or below a barrier." },
-  { id: "up_down", label: "Up / Down Ticks", hint: "Bet on whether the next tick moves up or down." },
+export const STRATEGIES: { id: Strategy; label: string; hint: string; direction: Direction }[] = [
+  {
+    id: "only_ups",
+    label: "Only Ups",
+    hint: "Win only if EVERY tick is strictly higher than the previous one.",
+    direction: "up",
+  },
+  {
+    id: "only_downs",
+    label: "Only Downs",
+    hint: "Win only if EVERY tick is strictly lower than the previous one.",
+    direction: "down",
+  },
 ];
 
 export function nextTick(price: number, vol: number): number {
@@ -33,18 +42,26 @@ export function simulateTrade(opts: {
   vol: number;
   direction: Direction;
   stake: number;
-  payoutRate?: number; // e.g. 0.92 -> 92% return on win
+  payoutRate?: number; // e.g. 4.0 -> 400% return on win (Only Ups/Downs are high-payout)
 }): { exit: number; result: "win" | "loss"; pnl: number; payout: number; path: number[] } {
-  const payoutRate = opts.payoutRate ?? 0.92;
+  // Only Ups / Only Downs are rare events with high payout multiples.
+  // Default payout scales with tick count: roughly 2^n - 1 minus house edge.
+  const fairMultiple = Math.pow(2, opts.ticks) - 1;
+  const payoutRate = opts.payoutRate ?? fairMultiple * 0.85;
   const path: number[] = [opts.entry];
   let p = opts.entry;
   for (let i = 0; i < opts.ticks; i++) {
     p = nextTick(p, opts.vol);
     path.push(p);
   }
-  const moved = p - opts.entry;
-  const isUp = moved > 0;
-  const win = (opts.direction === "up" && isUp) || (opts.direction === "down" && !isUp);
+  // Only Ups: every tick strictly > previous. Only Downs: every tick strictly < previous.
+  let win = true;
+  for (let i = 1; i < path.length; i++) {
+    const stepUp = path[i] > path[i - 1];
+    const stepDown = path[i] < path[i - 1];
+    if (opts.direction === "up" && !stepUp) { win = false; break; }
+    if (opts.direction === "down" && !stepDown) { win = false; break; }
+  }
   const payout = win ? opts.stake * (1 + payoutRate) : 0;
   const pnl = win ? opts.stake * payoutRate : -opts.stake;
   return { exit: p, result: win ? "win" : "loss", pnl, payout, path };
