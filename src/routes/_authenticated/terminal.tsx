@@ -241,13 +241,13 @@ function Terminal() {
       while (!cancelled) {
         const cur = useSession.getState();
         if (cur.status !== "running" || !cur.config.autoTrade) break;
+        if (tradingRef.current) { await new Promise(r => setTimeout(r, 200)); continue; }
         const dir = STRATEGIES.find(x => x.id === cur.config.strategy)!.direction;
-        // Wait for signal
-        // Poll the latest tick window every 250ms until signal fires
-        // (cheap, since ticks update via state)
-        // Safety cap: 60s wait per entry then fall through anyway
         const waitStart = Date.now();
+        let fired = false;
         while (!cancelled) {
+          const st = useSession.getState();
+          if (st.status !== "running" || !st.config.autoTrade) return;
           const quotes = ticksRef.current.map((t) => t.quote);
           const sig = evaluateSignal(quotes, {
             mode: cur.config.entryMode,
@@ -255,15 +255,20 @@ function Terminal() {
             direction: dir,
           });
           setSignalReason(sig.reason);
-          if (sig.fire) break;
-          if (Date.now() - waitStart > 60000) { setSignalReason("timeout — firing"); break; }
+          if (sig.fire) { fired = true; break; }
+          if (Date.now() - waitStart > 30000) { setSignalReason("timeout — firing"); fired = true; break; }
           await new Promise((r) => setTimeout(r, 250));
-          if (useSession.getState().status !== "running" || !useSession.getState().config.autoTrade) return;
         }
-        if (cancelled) return;
+        if (cancelled || !fired) return;
         setSignalReason(`entering ${dir.toUpperCase()}`);
-        await placeTrade(dir);
-        await new Promise(r => setTimeout(r, Math.max(500, cur.config.cooldownSeconds * 1000)));
+        try {
+          await placeTrade(dir);
+        } catch (e: any) {
+          toast.error(e?.message ?? "Trade error");
+          setSignalReason("error — retrying");
+        }
+        const cool = Math.max(500, useSession.getState().config.cooldownSeconds * 1000);
+        await new Promise(r => setTimeout(r, cool));
       }
     };
     loop();
