@@ -87,6 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className="md:pl-64">
         <div className="mx-auto max-w-6xl px-4 pb-32 pt-4 md:px-8 md:py-8">{children}</div>
+        <SiteFooter />
       </main>
 
       {/* Bottom nav (mobile) */}
