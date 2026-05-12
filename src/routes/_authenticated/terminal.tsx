@@ -537,3 +537,56 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
+
+/**
+ * Number input that lets the user type freely (including empty/partial like "0." or "")
+ * and only commits a valid number on blur or Enter. No spinner placeholders that
+ * fight the user's typing.
+ */
+function NumInput({
+  value,
+  onCommit,
+  min,
+  max,
+  step = 1,
+  integer = false,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  integer?: boolean;
+}) {
+  const [text, setText] = useState<string>(String(value));
+  const focusedRef = useRef(false);
+  useEffect(() => { if (!focusedRef.current) setText(String(value)); }, [value]);
+  function commit() {
+    const raw = text.trim();
+    if (raw === "" || raw === "-" || raw === "." || raw === "-.") { setText(String(value)); return; }
+    let n = Number(raw);
+    if (!Number.isFinite(n)) { setText(String(value)); return; }
+    if (integer) n = Math.round(n);
+    if (min != null && n < min) n = min;
+    if (max != null && n > max) n = max;
+    setText(String(n));
+    onCommit(n);
+  }
+  return (
+    <input
+      type="text"
+      inputMode={integer ? "numeric" : "decimal"}
+      value={text}
+      onFocus={(e) => { focusedRef.current = true; e.currentTarget.select(); }}
+      onChange={(e) => {
+        const v = e.target.value;
+        // allow empty + valid numeric fragments
+        if (v === "" || /^-?\d*\.?\d*$/.test(v)) setText(v);
+      }}
+      onBlur={() => { focusedRef.current = false; commit(); }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      step={step}
+      className="select-base"
+    />
+  );
+}
