@@ -350,22 +350,32 @@ function Terminal() {
           <Panel>
             <div className="grid grid-cols-2 gap-3">
               <button
-                disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_ups", autoTrade: true }); placeTrade("up"); }}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-up py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50"
+                disabled={connState !== "connected"}
+                onClick={async () => {
+                  s.setConfig({ strategy: "only_ups", autoTrade: true });
+                  if (useSession.getState().status !== "running") await start();
+                }}
+                className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50 ${s.config.autoTrade && s.config.strategy === "only_ups" && s.status === "running" ? "bg-up ring-2 ring-up/50 shadow-lg shadow-up/20" : "bg-up/90 hover:bg-up"}`}
               >
                 <TrendingUp className="h-6 w-6" />
                 <span className="text-base font-bold">ONLY UPS</span>
-                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all rising</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">
+                  {s.config.autoTrade && s.config.strategy === "only_ups" && s.status === "running" ? "● bot live" : `${s.config.durationTicks}t · all rising`}
+                </span>
               </button>
               <button
-                disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_downs", autoTrade: true }); placeTrade("down"); }}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-down py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50"
+                disabled={connState !== "connected"}
+                onClick={async () => {
+                  s.setConfig({ strategy: "only_downs", autoTrade: true });
+                  if (useSession.getState().status !== "running") await start();
+                }}
+                className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50 ${s.config.autoTrade && s.config.strategy === "only_downs" && s.status === "running" ? "bg-down ring-2 ring-down/50 shadow-lg shadow-down/20" : "bg-down/90 hover:bg-down"}`}
               >
                 <TrendingDown className="h-6 w-6" />
                 <span className="text-base font-bold">ONLY DOWNS</span>
-                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all falling</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">
+                  {s.config.autoTrade && s.config.strategy === "only_downs" && s.status === "running" ? "● bot live" : `${s.config.durationTicks}t · all falling`}
+                </span>
               </button>
             </div>
             <p className="mt-3 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
@@ -373,12 +383,12 @@ function Terminal() {
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               {s.status !== "running" ? (
-                <button onClick={start} className="col-span-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">
+                <button onClick={start} disabled={connState !== "connected"} className="col-span-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
                   <Play className="-mt-0.5 mr-1 inline h-4 w-4" /> Start session
                 </button>
               ) : (
                 <button onClick={endSession} className="col-span-2 rounded-full bg-down px-4 py-3 text-sm font-semibold text-down-foreground">
-                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> End session
+                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> Stop bot
                 </button>
               )}
             </div>
