@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel } from "@/components/app-shell";
@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { DerivClient } from "@/lib/deriv";
-import { ExternalLink, ShieldCheck, Loader2 } from "lucide-react";
+import { ExternalLink, ShieldCheck, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({ meta: [{ title: "Settings — Tickwise" }] }),
@@ -19,7 +19,11 @@ function Settings() {
   const [token, setToken] = useState("");
   const [savedToken, setSavedToken] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [accountInfo, setAccountInfo] = useState<{ loginid: string; currency: string; balance: number; is_virtual: boolean } | null>(null);
+
+  const tokenInputType = showToken ? "text" : "password";
 
   useEffect(() => {
     if (!user) return;
