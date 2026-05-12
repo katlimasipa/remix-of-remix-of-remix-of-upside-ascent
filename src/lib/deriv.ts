@@ -155,6 +155,20 @@ export class DerivClient {
     try { await this.send({ forget_all: "candles" }); } catch {}
   }
 
+  // Fetch a window of recent tick history (no subscribe)
+  async fetchTickHistory(symbol: string, count = 200): Promise<DerivTick[]> {
+    const res = await this.send({
+      ticks_history: symbol,
+      adjust_start_time: 1,
+      count,
+      end: "latest",
+      style: "ticks",
+    });
+    const prices: number[] = res.history?.prices ?? [];
+    const times: number[] = res.history?.times ?? [];
+    return prices.map((p, i) => ({ symbol, quote: Number(p), epoch: Number(times[i]) }));
+  }
+
   // Buy an Only Ups / Only Downs contract.
   // contract_type: ONLYUPS or ONLYDOWNS
   // duration: tick count (5 to 10 typically for these)
