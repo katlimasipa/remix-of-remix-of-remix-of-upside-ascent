@@ -2,9 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel, StatCard } from "@/components/app-shell";
-import { CandleChart, type Candle } from "@/components/candle-chart";
+import { TickChart, type TickPoint } from "@/components/tick-chart";
 import { STRATEGIES, nextStake, totalExposure, fmtMoney, type Direction } from "@/lib/trading";
-import { DerivClient, DERIV_MARKETS, GRANULARITIES } from "@/lib/deriv";
+import { DerivClient, DERIV_MARKETS } from "@/lib/deriv";
 import { Play, Square, TrendingUp, TrendingDown, Zap, Wifi, WifiOff, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,8 +28,8 @@ function Terminal() {
   const [tab, setTab] = useState<Tab>("chart");
   const [token, setToken] = useState<string | null>(null);
   const [tokenChecked, setTokenChecked] = useState(false);
-  const [granularity, setGranularity] = useState(60);
-  const [candles, setCandles] = useState<Candle[]>([]);
+  const [ticks, setTicks] = useState<TickPoint[]>([]);
+  const [trend, setTrend] = useState<"up" | "down" | "flat">("flat");
   const [lastQuote, setLastQuote] = useState<number | null>(null);
   const [connState, setConnState] = useState<"idle" | "connecting" | "connected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -83,34 +83,36 @@ function Terminal() {
     };
   }, [token]);
 
-  // Subscribe to ticks + candles when symbol/granularity changes
+  // Subscribe to live tick stream + backfill recent history
   useEffect(() => {
     const c = clientRef.current;
     if (!c || connState !== "connected") return;
     const sym = s.config.market;
-    setCandles([]);
+    setTicks([]);
+    setTrend("flat");
     let mounted = true;
     (async () => {
       try {
         await c.unsubscribeTicks(sym);
-        await c.unsubscribeCandles(sym);
+        // Backfill ~200 recent ticks for context
+        const history = await c.fetchTickHistory(sym, 240);
+        if (!mounted) return;
+        setTicks(history);
         await c.subscribeTicks(sym, (t) => {
           if (!mounted) return;
-          setLastQuote(t.quote);
-          useSession.setState({ price: t.quote });
-        });
-        await c.subscribeCandles(sym, granularity, 200, (candle, isInitial) => {
-          if (!mounted) return;
-          setCandles((prev) => {
-            if (isInitial) {
-              // batch initial loads
-              const map = new Map(prev.map((p) => [p.epoch, p]));
-              map.set(candle.epoch, candle);
-              return Array.from(map.values()).sort((a, b) => a.epoch - b.epoch);
+          setLastQuote((prev) => {
+            if (prev != null) {
+              if (t.quote > prev) setTrend("up");
+              else if (t.quote < prev) setTrend("down");
             }
-            const idx = prev.findIndex((p) => p.epoch === candle.epoch);
-            if (idx >= 0) { const next = prev.slice(); next[idx] = candle; return next; }
-            return [...prev, candle].slice(-300);
+            return t.quote;
+          });
+          useSession.setState({ price: t.quote });
+          setTicks((prev) => {
+            const next = prev.length && prev[prev.length - 1].epoch === t.epoch
+              ? prev.slice(0, -1).concat({ epoch: t.epoch, quote: t.quote })
+              : prev.concat({ epoch: t.epoch, quote: t.quote });
+            return next.slice(-300);
           });
         });
       } catch (e: any) {
@@ -118,7 +120,7 @@ function Terminal() {
       }
     })();
     return () => { mounted = false; };
-  }, [s.config.market, granularity, connState]);
+  }, [s.config.market, connState]);
 
   async function start() {
     if (connState !== "connected") return toast.error("Connect your Deriv token in Settings first.");
@@ -305,16 +307,17 @@ function Terminal() {
             <select value={s.config.market} onChange={(e) => s.setConfig({ market: e.target.value })} className="select-base !w-auto">
               {DERIV_MARKETS.map((m) => <option key={m.symbol} value={m.symbol}>{m.name}</option>)}
             </select>
-            <div className="ml-auto flex gap-1">
-              {GRANULARITIES.map((g) => (
-                <button key={g.v} onClick={() => setGranularity(g.v)} className={`rounded-md px-2 py-1 font-mono text-[10px] uppercase ${granularity === g.v ? "bg-primary text-primary-foreground" : "bg-surface text-muted-foreground"}`}>{g.label}</button>
-              ))}
+            <div className="ml-auto flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              <span className={`rounded-md px-2 py-1 ${trend === "up" ? "bg-up/15 text-up" : trend === "down" ? "bg-down/15 text-down" : "bg-surface"}`}>
+                {trend === "up" ? "▲ tick up" : trend === "down" ? "▼ tick dn" : "— flat"}
+              </span>
+              <span>{ticks.length} ticks</span>
             </div>
           </div>
-          {candles.length === 0 ? (
-            <div className="grid h-[320px] place-items-center text-xs text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Streaming candles…</div>
+          {ticks.length === 0 ? (
+            <div className="grid h-[320px] place-items-center text-xs text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Streaming ticks…</div>
           ) : (
-            <CandleChart candles={candles} height={340} />
+            <TickChart ticks={ticks} trend={trend} height={340} />
           )}
         </Panel>
       )}
