@@ -3,16 +3,14 @@ import path from 'path';
 
 const distServer = path.resolve('dist/server');
 const distClient = path.resolve('dist/client');
-const outputDir = path.resolve('.vercel/output');
+const apiDir = path.resolve('api');
+const publicDir = path.resolve('public');
 
-console.log('Generating Vercel Build Output API v3 structure...');
+console.log('Staging files for Vercel...');
 
-// 1. Clean and create directories
-if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true });
-fs.mkdirSync(path.join(outputDir, 'static'), { recursive: true });
-fs.mkdirSync(path.join(outputDir, 'functions/index.func'), { recursive: true });
+if (!fs.existsSync(apiDir)) fs.mkdirSync(apiDir, { recursive: true });
+if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
 
-// 2. Copy static files
 function copyRecursive(src, dest) {
   if (!fs.existsSync(src)) return;
   const stats = fs.statSync(src);
@@ -26,47 +24,35 @@ function copyRecursive(src, dest) {
   }
 }
 
+// 1. Copy client assets to public/ for static serving
 if (fs.existsSync(distClient)) {
-  copyRecursive(distClient, path.join(outputDir, 'static'));
-  console.log('Copied static assets.');
+  copyRecursive(distClient, publicDir);
+  console.log('Copied client files to public/');
 }
 
-// 3. Setup SSR function
+// 2. Resolve the hashed server entry and create a static bridge in api/index.js
 if (fs.existsSync(distServer)) {
-  // Copy server files to function directory
-  copyRecursive(distServer, path.join(outputDir, 'functions/index.func'));
+  const assetsDir = path.join(distServer, 'assets');
+  const files = fs.readdirSync(assetsDir);
+  const serverEntry = files.find(f => f.startsWith('server-') && f.endsWith('.js'));
   
-  // Create bridge index.js inside the function directory
-  // We use require/import bridge to TanStack Start
-  const bridgeContent = `
-import server from './server.js';
+  if (serverEntry) {
+    console.log(`Found server entry: ${serverEntry}`);
+    
+    // Create a self-contained bridge in api/index.js
+    // We import the hashed entry STATICALLY so Vercel's bundler can find it.
+    const bridgeContent = `
 import { toNodeHandler } from 'srvx/node';
+import serverEntry from '../dist/server/assets/${serverEntry}';
 
-export default toNodeHandler(server.fetch);
+// Replicate the error wrapping from src/server.ts if needed, 
+// but for now let's just bridge the core handler.
+export default toNodeHandler(serverEntry.fetch || serverEntry.default?.fetch || serverEntry);
 `;
-  fs.writeFileSync(path.join(outputDir, 'functions/index.func/index.js'), bridgeContent);
-
-  // Create .vc-config.json for the function
-  const vcConfig = {
-    runtime: 'nodejs22.x',
-    handler: 'index.js',
-    launcherType: 'Nodejs',
-    shouldAddHelpers: true,
-    shouldAddVarsToContext: true
-  };
-  fs.writeFileSync(path.join(outputDir, 'functions/index.func/.vc-config.json'), JSON.stringify(vcConfig, null, 2));
-  
-  console.log('Configured SSR function.');
+    fs.writeFileSync(path.join(apiDir, 'index.js'), bridgeContent);
+    console.log('Created static bridge in api/index.js');
+  } else {
+    console.error('Could not find server entry in dist/server/assets');
+    process.exit(1);
+  }
 }
-
-// 4. Create config.json
-const config = {
-  version: 3,
-  routes: [
-    { handle: 'filesystem' },
-    { src: '/(.*)', dest: 'index' }
-  ]
-};
-fs.writeFileSync(path.join(outputDir, 'config.json'), JSON.stringify(config, null, 2));
-
-console.log('Vercel Build Output API v3 structure successfully generated.');

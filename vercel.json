@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build && npm run postbuild",
+  "functions": {
+    "api/index.js": {
+      "runtime": "nodejs22.x"
+    }
+  },
+  "rewrites": [
+    { "handle": "filesystem" },
+    { "source": "/(.*)", "destination": "/api/index.js" }
+  ]
+}
