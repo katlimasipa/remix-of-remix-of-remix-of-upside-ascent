@@ -3,224 +3,157 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/lib/store";
-import { DerivClient, DERIV_MARKETS } from "@/lib/deriv";
+import { DerivClient } from "@/lib/deriv";
 import { toast } from "sonner";
-import { ExternalLink, Loader2, ShieldCheck, Sparkles, ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, Loader2, PlugZap } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
-  head: () => ({ meta: [{ title: "Setup — Tickwise" }] }),
+  head: () => ({ meta: [{ title: "Connect Deriv — Tickwise" }] }),
   component: Onboarding,
 });
 
+function friendlyTokenError(message: string) {
+  const m = message.toLowerCase();
+  if (m.includes("invalid token") || m.includes("authorize")) return "Deriv rejected this token. Copy the token again from your Virtual account and paste it here.";
+  if (m.includes("scope")) return message;
+  if (m.includes("timed out") || m.includes("not connected")) return "Could not reach Deriv. Check your connection and try again.";
+  return message || "Token rejected by Deriv.";
+}
+
 function Onboarding() {
   const { user } = useAuth();
-  const nav = useNavigate();
-  const s = useSession();
-
+  const navigate = useNavigate();
   const [token, setToken] = useState("");
-  const [verified, setVerified] = useState<{ loginid: string; currency: string; balance: number } | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Defaults form
-  const [market, setMarket] = useState(s.config.market);
-  const [baseStake, setBaseStake] = useState(s.config.baseStake);
-  const [duration, setDuration] = useState(s.config.durationTicks);
-  const [martingale, setMartingale] = useState(s.config.martingaleEnabled);
-  const [multiplier, setMultiplier] = useState(s.config.martingaleMultiplier);
-  const [maxLevels, setMaxLevels] = useState(s.config.maxMartingaleLevels);
-  const [takeProfit, setTakeProfit] = useState(s.config.takeProfit ?? 50);
-  const [stopLoss, setStopLoss] = useState(s.config.stopLoss ?? 25);
-
-  // If user already onboarded, skip.
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("deriv_api_token").eq("id", user.id).maybeSingle().then(({ data }) => {
-      if (data?.deriv_api_token) nav({ to: "/terminal" });
-    });
-  }, [user, nav]);
+    supabase
+      .from("profiles")
+      .select("deriv_api_token")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.deriv_api_token) navigate({ to: "/terminal" });
+      });
+  }, [user, navigate]);
 
-  async function verifyToken() {
-    const t = token.trim();
-    if (!t) return toast.error("Paste your Deriv API token first.");
-    setTesting(true);
-    setVerified(null);
+  async function connectAndSave() {
+    const cleanToken = token.trim();
+    if (!user) return;
+    if (!cleanToken) {
+      setError("Paste your Deriv demo API token first.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
     const client = new DerivClient();
+
     try {
       await client.connect();
-      const auth = await client.authorize(t);
+      const auth = await client.authorize(cleanToken);
+
       if (!auth.is_virtual) {
-        toast.error("That is a REAL-money token. Use a DEMO (Virtual) account token.");
-        return;
+        throw new Error("This token belongs to a real-money account. Switch to your Deriv Virtual account and create a demo token.");
       }
-      setVerified({ loginid: auth.loginid, currency: auth.currency, balance: Number(auth.balance) });
-      toast.success(`Verified ${auth.loginid} (${auth.currency})`);
+
+      const { error: saveError } = await supabase.from("profiles").upsert({
+        id: user.id,
+        display_name: user.user_metadata?.display_name ?? user.email?.split("@")[0] ?? "Trader",
+        deriv_api_token: cleanToken,
+        deriv_account_id: auth.loginid,
+        deriv_currency: auth.currency ?? "USD",
+        starting_balance: Number(auth.balance ?? 1000),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" });
+
+      if (saveError) throw saveError;
+
+      useSession.setState({
+        startingBalance: Number(auth.balance ?? 1000),
+        derivAccountId: auth.loginid,
+        derivCurrency: auth.currency ?? "USD",
+        derivLiveBalance: Number(auth.balance ?? 0),
+        derivConnected: true,
+        derivAuthorized: true,
+      });
+
+      toast.success(`Connected and saved: ${auth.loginid}`);
+      navigate({ to: "/terminal" });
     } catch (e: any) {
-      toast.error(e?.message ?? "Token rejected by Deriv.");
+      const msg = friendlyTokenError(e?.message ?? "Token rejected by Deriv.");
+      setError(msg);
+      toast.error(msg);
     } finally {
       client.close();
-      setTesting(false);
-    }
-  }
-
-  async function finish() {
-    if (!user) return;
-    if (!verified) return toast.error("Verify your Deriv token before continuing.");
-    setSaving(true);
-    try {
-      const { error } = await supabase.from("profiles").update({
-        deriv_api_token: token.trim(),
-        deriv_account_id: verified.loginid,
-        deriv_currency: verified.currency,
-      }).eq("id", user.id);
-      if (error) throw error;
-
-      s.setConfig({
-        market,
-        baseStake,
-        durationTicks: duration,
-        martingaleEnabled: martingale,
-        martingaleMultiplier: multiplier,
-        maxMartingaleLevels: maxLevels,
-        takeProfit: takeProfit || null,
-        stopLoss: stopLoss || null,
-      });
-      useSession.setState({ startingBalance: verified.balance });
-
-      toast.success("All set. Welcome to Tickwise.");
-      nav({ to: "/terminal" });
-    } catch (e: any) {
-      toast.error(e?.message ?? "Failed to save.");
-    } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-3xl pb-10">
-      <header className="mb-6 flex items-center gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-          <Sparkles className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="font-display text-2xl font-semibold">One-time setup</h1>
-          <p className="text-xs text-muted-foreground">Connect your Deriv DEMO account and configure defaults. You won't see this screen again.</p>
-        </div>
-      </header>
-
-      {/* Step 1: Token */}
-      <section className="rounded-2xl border border-border bg-surface/40 p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold">1. Connect Deriv</h2>
-          {verified && (
-            <span className="flex items-center gap-1 rounded-full bg-up/15 px-2 py-1 text-[10px] font-mono uppercase tracking-widest text-up">
-              <ShieldCheck className="h-3 w-3" /> {verified.loginid}
-            </span>
-          )}
-        </div>
-        <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
-          <li>Open <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer" className="text-primary hover:underline">app.deriv.com → API token <ExternalLink className="inline h-3 w-3" /></a></li>
-          <li>Switch to a <strong>Virtual / Demo</strong> account (top-right account switcher).</li>
-          <li>Create a token with <code>read</code> + <code>trade</code> scopes. Copy &amp; paste below.</li>
-        </ol>
-
-        <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto]">
-          <input
-            type="password"
-            autoComplete="off"
-            value={token}
-            onChange={(e) => { setToken(e.target.value); setVerified(null); }}
-            placeholder="paste demo token"
-            className="input"
-          />
-          <button
-            onClick={verifyToken}
-            disabled={testing || !token.trim()}
-            className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            {testing ? <Loader2 className="inline h-4 w-4 animate-spin" /> : verified ? "Re-verify" : "Verify token"}
-          </button>
-        </div>
-        {verified && (
-          <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-border bg-background/40 p-3 text-xs">
-            <Stat k="Account" v={verified.loginid} />
-            <Stat k="Balance" v={`${verified.balance.toFixed(2)} ${verified.currency}`} />
-            <Stat k="Type" v="DEMO" accent />
+    <div className="mx-auto flex min-h-[calc(100svh-8rem)] max-w-xl items-center py-6">
+      <section className="panel w-full p-5 md:p-6">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
+            <PlugZap className="h-5 w-5" />
           </div>
-        )}
-      </section>
-
-      {/* Step 2: Defaults */}
-      <section className="mt-4 rounded-2xl border border-border bg-surface/40 p-5">
-        <h2 className="font-display text-lg font-semibold">2. Trading defaults</h2>
-        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-          <Field label="Market">
-            <select value={market} onChange={(e) => setMarket(e.target.value)} className="input">
-              {DERIV_MARKETS.map((m) => <option key={m.symbol} value={m.symbol}>{m.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Base stake ($)">
-            <input type="number" step={0.1} min={0.35} value={baseStake} onChange={(e) => setBaseStake(+e.target.value)} className="input" />
-          </Field>
-          <Field label="Ticks">
-            <input type="number" min={5} max={10} value={duration} onChange={(e) => setDuration(+e.target.value)} className="input" />
-          </Field>
-          <Field label="Take profit ($)">
-            <input type="number" min={0} value={takeProfit} onChange={(e) => setTakeProfit(+e.target.value)} className="input" />
-          </Field>
-          <Field label="Stop loss ($)">
-            <input type="number" min={0} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} className="input" />
-          </Field>
+          <div>
+            <h1 className="font-display text-2xl font-semibold">Connect Deriv</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Paste one Deriv Virtual API token. Tickwise verifies it and saves it to your account.</p>
+          </div>
         </div>
-      </section>
 
-      {/* Step 3: Martingale */}
-      <section className="mt-4 rounded-2xl border border-border bg-surface/40 p-5">
-        <h2 className="font-display text-lg font-semibold">3. Martingale</h2>
-        <label className="mt-3 flex cursor-pointer items-center justify-between rounded-xl border border-border bg-background/40 px-3 py-2.5">
-          <span className="text-sm font-medium">Enable Martingale recovery</span>
-          <input type="checkbox" checked={martingale} onChange={(e) => setMartingale(e.target.checked)} className="h-4 w-4 accent-primary" />
+        <div className="mt-5 rounded-xl border border-border bg-surface/50 p-3 text-xs text-muted-foreground">
+          <div className="flex gap-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-up" />
+            <p>Create the token while switched to your <strong>Virtual</strong> Deriv account. Enable <strong>Read</strong> and <strong>Trade</strong>.</p>
+          </div>
+          <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-primary hover:underline">
+            Open Deriv API tokens <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+
+        <label className="mt-5 block">
+          <span className="mb-2 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">API token</span>
+          <div className="flex items-center rounded-xl border border-border bg-input focus-within:border-primary">
+            <input
+              type={showToken ? "text" : "password"}
+              autoComplete="off"
+              value={token}
+              onChange={(e) => { setToken(e.target.value); setError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") connectAndSave(); }}
+              placeholder="Paste token here"
+              className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-foreground outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken((v) => !v)}
+              className="grid h-11 w-11 place-items-center text-muted-foreground hover:text-foreground"
+              aria-label={showToken ? "Hide token" : "Show token"}
+            >
+              {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
         </label>
-        {martingale && (
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Field label="Multiplier">
-              <input type="number" step={0.1} min={1.1} value={multiplier} onChange={(e) => setMultiplier(+e.target.value)} className="input" />
-            </Field>
-            <Field label="Max levels">
-              <input type="number" min={1} max={15} value={maxLevels} onChange={(e) => setMaxLevels(+e.target.value)} className="input" />
-            </Field>
+
+        {error && (
+          <div className="mt-3 flex gap-2 rounded-xl border border-down/30 bg-down/10 p-3 text-xs text-down">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{error}</p>
           </div>
         )}
-      </section>
 
-      <div className="sticky bottom-4 mt-6 flex justify-end">
         <button
-          onClick={finish}
-          disabled={!verified || saving}
-          className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-lg disabled:opacity-50"
+          onClick={connectAndSave}
+          disabled={saving || !token.trim()}
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Enter terminal <ArrowRight className="h-4 w-4" /></>}
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Connect & save <ArrowRight className="h-4 w-4" /></>}
         </button>
-      </div>
-
-      <style>{`.input{width:100%;background:var(--input);border:1px solid var(--border);border-radius:.65rem;padding:.55rem .7rem;font-size:.85rem;color:var(--foreground);outline:none}.input:focus{border-color:var(--primary)}`}</style>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
-function Stat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
-  return (
-    <div>
-      <div className="font-mono text-[10px] uppercase text-muted-foreground">{k}</div>
-      <div className={`font-semibold tabular ${accent ? "text-up" : ""}`}>{v}</div>
+      </section>
     </div>
   );
 }

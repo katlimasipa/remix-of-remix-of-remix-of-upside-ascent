@@ -12,15 +12,16 @@ function AuthLayout() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const loc = useLocation();
+  const isOnboarding = loc.pathname.startsWith("/onboarding");
 
   useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
-  }, [user, loading, navigate]);
+    if (!loading && !user && !isOnboarding) navigate({ to: "/login" });
+  }, [user, loading, navigate, isOnboarding]);
 
   // Force first-run users through /onboarding until they connect Deriv.
   useEffect(() => {
     if (!user) return;
-    if (loc.pathname.startsWith("/onboarding")) return;
+    if (isOnboarding) return;
     supabase
       .from("profiles")
       .select("deriv_api_token")
@@ -29,7 +30,11 @@ function AuthLayout() {
       .then(({ data }) => {
         if (!data?.deriv_api_token) navigate({ to: "/onboarding" });
       });
-  }, [user, loc.pathname, navigate]);
+  }, [user, isOnboarding, navigate]);
+
+  if (isOnboarding) {
+    return <Outlet />;
+  }
 
   if (loading || !user) {
     return (
