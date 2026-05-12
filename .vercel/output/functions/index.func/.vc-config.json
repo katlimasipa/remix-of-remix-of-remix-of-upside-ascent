@@ -1,0 +1,7 @@
+{
+  "runtime": "nodejs22.x",
+  "handler": "index.js",
+  "launcherType": "Nodejs",
+  "shouldAddHelpers": true,
+  "shouldAddVarsToContext": true
+}
