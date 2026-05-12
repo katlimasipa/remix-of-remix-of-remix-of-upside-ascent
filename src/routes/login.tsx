@@ -22,10 +22,10 @@ function Login() {
     setLoading(true);
     try {
       await signIn(email, password);
-      toast.success("Welcome back.");
+      toast.success("AUTH_SUCCESS: Session initialized");
       nav({ to: "/dashboard" });
     } catch (e: any) {
-      toast.error(e?.message ?? "Sign in failed");
+      toast.error(e?.message ?? "AUTH_ERROR: Invalid credentials");
     } finally {
       setLoading(false);
     }
@@ -33,18 +33,20 @@ function Login() {
 
   return (
     <AuthLayout>
-      <h1 className="font-display text-3xl font-semibold tracking-tight">Sign in</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Continue your trading session.</p>
-      <form onSubmit={onSubmit} className="mt-8 space-y-4">
-        <Field label="Email">
+      <div className="space-y-1">
+        <h1 className="font-display text-4xl font-black uppercase tracking-tighter">Authorize_</h1>
+        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Access_Engine_Terminal</p>
+      </div>
+      <form onSubmit={onSubmit} className="mt-10 space-y-5">
+        <Field label="Identity_Email">
           <input
             type="email" required autoComplete="email" value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="input-base"
-            placeholder="you@trader.io"
+            placeholder="ACCESS@KERNEL.IO"
           />
         </Field>
-        <Field label="Password">
+        <Field label="Access_Key">
           <input
             type="password" required autoComplete="current-password" value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -52,53 +54,71 @@ function Login() {
             placeholder="••••••••"
           />
         </Field>
-        <div className="flex items-center justify-between text-sm">
-          <label className="flex items-center gap-2 text-muted-foreground">
+        <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-widest">
+          <label className="flex items-center gap-2 text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-primary" />
-            Remember me
+            Persist_Session
           </label>
-          <Link to="/forgot-password" className="text-primary hover:underline">Forgot password?</Link>
+          <Link to="/forgot-password" size="sm" className="text-primary/60 hover:text-primary">Key_Recovery</Link>
         </div>
-        <button disabled={loading} className="btn-primary w-full">
-          {loading ? "Signing in…" : "Sign in"}
+        <button disabled={loading} className="btn-primary w-full relative group overflow-hidden">
+          <span className="relative z-10">{loading ? "INITIALIZING..." : "EXECUTE_SIGN_IN"}</span>
+          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
         </button>
       </form>
-      <p className="mt-6 text-sm text-muted-foreground">
-        New here? <Link to="/signup" className="text-primary hover:underline">Create an account</Link>
-      </p>
+      <div className="mt-8 pt-8 border-t border-border/40">
+        <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+          New_Unit? <Link to="/signup" className="text-primary hover:text-primary/80 font-bold underline-offset-4 underline">Register_Module</Link>
+        </p>
+      </div>
     </AuthLayout>
   );
 }
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid min-h-svh md:grid-cols-2">
-      <div className="relative hidden overflow-hidden md:block">
-        <div className="grid-bg absolute inset-0 opacity-60" />
-        <div className="relative flex h-full flex-col justify-between p-10">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground"><Activity className="h-4 w-4" /></div>
-            <span className="font-display text-lg font-semibold">Tickwise</span>
+    <div className="grid min-h-svh md:grid-cols-2 bg-background selection:bg-primary/30 selection:text-primary">
+      <div className="relative hidden overflow-hidden md:block border-r border-border/40">
+        <div className="grid-bg absolute inset-0 opacity-40" />
+        <div className="relative flex h-full flex-col justify-between p-12 bg-muted/5">
+          <Link to="/" className="flex items-center gap-3">
+            <div className="relative grid h-10 w-10 place-items-center rounded bg-primary text-primary-foreground shadow-[0_0_20px_rgba(var(--primary),0.3)]">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="font-display text-2xl font-bold tracking-tighter uppercase">Tickwise</div>
           </Link>
-          <div>
-            <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">a focused trading terminal</div>
-            <h2 className="mt-3 max-w-md font-display text-3xl font-semibold leading-tight">Ups, downs, and the discipline between them.</h2>
+          
+          <div className="space-y-4">
+            <div className="h-px w-12 bg-primary/40" />
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-primary/60">Execution_Telemetry_Live</div>
+            <h2 className="max-w-md font-display text-5xl font-black leading-[0.95] tracking-tighter uppercase">
+              Speed.<br />
+              <span className="text-muted-foreground/20">Discipline.</span><br />
+              Result.
+            </h2>
+            <p className="max-w-xs text-xs font-mono uppercase tracking-widest text-muted-foreground leading-relaxed">
+              Industrial-grade tick engine for sub-second speculative execution.
+            </p>
           </div>
-          <div className="font-mono text-xs text-muted-foreground">© {new Date().getFullYear()} Tickwise</div>
+          
+          <div className="font-mono text-[9px] uppercase tracking-[0.4em] text-muted-foreground/40">© ACCESS_RESERVED_V1.0</div>
         </div>
       </div>
-      <div className="flex items-center justify-center px-6 py-10">
-        <div className="w-full max-w-sm">
-          <Link to="/" className="mb-8 flex items-center gap-2 md:hidden">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground"><Activity className="h-4 w-4" /></div>
-            <span className="font-display text-lg font-semibold">Tickwise</span>
+      <div className="flex items-center justify-center px-8 py-12">
+        <div className="w-full max-w-[340px]">
+          <Link to="/" className="mb-12 flex items-center gap-3 md:hidden">
+            <div className="grid h-10 w-10 place-items-center rounded bg-primary text-primary-foreground">
+              <Activity className="h-5 w-5" />
+            </div>
+            <span className="font-display text-2xl font-bold tracking-tighter uppercase">Tickwise</span>
           </Link>
           {children}
           <style>{`
-            .input-base { width:100%; background: var(--input); border:1px solid var(--border); border-radius: 0.75rem; padding: 0.7rem 0.9rem; font-size: 0.9rem; color: var(--foreground); outline: none; transition: border-color .15s; }
-            .input-base:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 25%, transparent); }
-            .btn-primary { background: var(--primary); color: var(--primary-foreground); border-radius: 9999px; padding: 0.7rem 1rem; font-weight: 600; font-size: 0.9rem; transition: opacity .15s; }
-            .btn-primary:hover { opacity: 0.9; } .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+            .input-base { width:100%; background: var(--input); border:1px solid var(--border); border-radius: 4px; padding: 0.8rem 1rem; font-size: 0.85rem; color: var(--foreground); outline: none; transition: all .2s; font-family: var(--font-mono); }
+            .input-base:focus { border-color: var(--primary); background: var(--surface); }
+            .btn-primary { background: var(--primary); color: var(--primary-foreground); border-radius: 4px; padding: 1rem; font-weight: 900; font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.2em; transition: all .2s; }
+            .btn-primary:hover { brightness: 1.1; box-shadow: 0 0 20px color-mix(in oklch, var(--primary) 20%, transparent); } 
+            .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
           `}</style>
         </div>
       </div>
@@ -108,8 +128,8 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
+    <label className="block space-y-2">
+      <span className="block font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{label}</span>
       {children}
     </label>
   );

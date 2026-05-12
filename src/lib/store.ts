@@ -171,7 +171,22 @@ export const useSession = create<SessionState & Actions>()(
     }),
     {
       name: "tickwise-session",
-      partialize: (s) => ({ config: s.config, startingBalance: s.startingBalance }),
+      partialize: (s) => ({
+        config: s.config,
+        startingBalance: s.startingBalance,
+        status: s.status,
+        startedAt: s.startedAt,
+        balance: s.balance,
+        pnl: s.pnl,
+        trades: s.trades,
+        wins: s.wins,
+        losses: s.losses,
+        consecutiveWins: s.consecutiveWins,
+        consecutiveLosses: s.consecutiveLosses,
+        currentLevel: s.currentLevel,
+        lastResult: s.lastResult,
+        nextStake: s.nextStake,
+      }),
     }
   )
 );
