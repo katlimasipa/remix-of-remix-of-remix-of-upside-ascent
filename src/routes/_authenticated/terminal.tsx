@@ -84,6 +84,11 @@ function Terminal() {
     };
   }, [token]);
 
+  useEffect(() => {
+    const durationTicks = Math.max(2, Math.min(5, Math.round(s.config.durationTicks)));
+    if (durationTicks !== s.config.durationTicks) s.setConfig({ durationTicks });
+  }, [s.config.durationTicks, s.setConfig]);
+
   // Subscribe to live tick stream + backfill recent history
   useEffect(() => {
     const c = clientRef.current;
@@ -407,7 +412,7 @@ function Terminal() {
                   <NumInput value={s.config.baseStake} onCommit={(n) => s.setConfig({ baseStake: n })} min={0.01} step={0.1} />
                 </Field>
                 <Field label="Ticks">
-                  <NumInput value={s.config.durationTicks} onCommit={(n) => s.setConfig({ durationTicks: Math.max(5, Math.min(10, Math.round(n))) })} min={5} max={10} step={1} integer />
+                  <NumInput value={s.config.durationTicks} onCommit={(n) => s.setConfig({ durationTicks: Math.max(2, Math.min(5, Math.round(n))) })} min={2} max={5} step={1} integer />
                 </Field>
               </div>
               <label className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
