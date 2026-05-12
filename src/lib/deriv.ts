@@ -170,8 +170,8 @@ export class DerivClient {
   }
 
   // Buy an Only Ups / Only Downs contract.
-  // contract_type: ONLYUPS or ONLYDOWNS
-  // duration: tick count (5 to 10 typically for these)
+  // Official Deriv contract types: RUNHIGH (Only Ups) and RUNLOW (Only Downs).
+  // These tick contracts are offered for 2–5 ticks on synthetic demo markets.
   async buyOnlyUpsDowns(opts: {
     symbol: string;
     direction: "up" | "down";
@@ -179,7 +179,8 @@ export class DerivClient {
     ticks: number;
     currency: string;
   }) {
-    const contract_type = opts.direction === "up" ? "ONLYUPS" : "ONLYDOWNS";
+    const contract_type = opts.direction === "up" ? "RUNHIGH" : "RUNLOW";
+    const duration = Math.max(2, Math.min(5, Math.round(opts.ticks)));
     // 1) Get a proposal so we know the payout
     const proposal = await this.send({
       proposal: 1,
@@ -187,7 +188,7 @@ export class DerivClient {
       basis: "stake",
       contract_type,
       currency: opts.currency,
-      duration: opts.ticks,
+      duration,
       duration_unit: "t",
       symbol: opts.symbol,
     });
