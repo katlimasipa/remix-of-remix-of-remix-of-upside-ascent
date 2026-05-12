@@ -39,12 +39,15 @@ function Settings() {
     if (!user) return;
     if (!token.trim()) return toast.error("Paste your Deriv API token first.");
     setTesting(true);
+    setTokenError(null);
     const client = new DerivClient();
     try {
       await client.connect();
       const auth = await client.authorize(token.trim());
       if (!auth.is_virtual) {
-        toast.error("This is a REAL account token. Use a DEMO token only.");
+        const msg = "This is a real-money token. Switch to your Deriv Virtual account and create a demo token.";
+        setTokenError(msg);
+        toast.error(msg);
         client.close();
         return;
       }
@@ -54,15 +57,23 @@ function Settings() {
         balance: Number(auth.balance),
         is_virtual: auth.is_virtual,
       });
-      await supabase.from("profiles").update({
+      const { error } = await supabase.from("profiles").upsert({
+        id: user.id,
+        display_name: user.user_metadata?.display_name ?? user.email?.split("@")[0] ?? "Trader",
         deriv_api_token: token.trim(),
         deriv_account_id: auth.loginid,
         deriv_currency: auth.currency,
-      }).eq("id", user.id);
+        starting_balance: Number(auth.balance ?? 1000),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" });
+      if (error) throw error;
       setSavedToken(token.trim());
+      useSession.setState({ derivAccountId: auth.loginid, derivCurrency: auth.currency, derivLiveBalance: Number(auth.balance), startingBalance: Number(auth.balance ?? 1000) });
       toast.success(`Connected: ${auth.loginid} (${auth.currency})`);
     } catch (e: any) {
-      toast.error(e?.message ?? "Failed to authorize");
+      const msg = e?.message ?? "Failed to authorize";
+      setTokenError(msg);
+      toast.error(msg);
     } finally {
       client.close();
       setTesting(false);
