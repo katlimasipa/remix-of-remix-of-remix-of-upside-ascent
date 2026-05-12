@@ -58,6 +58,7 @@ export type SessionState = {
   derivCurrency: string;
   derivLiveBalance: number | null;
   liveSymbol: string;
+  theme: "dark" | "light";
 };
 
 export const defaultConfig: SessionConfig = {
@@ -87,6 +88,7 @@ type Actions = {
   recordTrade: (t: Omit<TradeRecord, "id" | "ts">) => void;
   setPrice: (p: number) => void;
   setNextStake: (s: number, lvl: number) => void;
+  setTheme: (t: "dark" | "light") => void;
   reset: () => void;
 };
 
@@ -114,6 +116,7 @@ const initial: SessionState = {
   derivCurrency: "USD",
   derivLiveBalance: null,
   liveSymbol: "R_50",
+  theme: "dark",
 };
 
 export const useSession = create<SessionState & Actions>()(
@@ -167,11 +170,13 @@ export const useSession = create<SessionState & Actions>()(
         }),
       setPrice: (p) => set({ price: p }),
       setNextStake: (s, lvl) => set({ nextStake: s, currentLevel: lvl }),
-      reset: () => set(initial),
+      setTheme: (t) => set({ theme: t }),
+      reset: () => set((s) => ({ ...initial, theme: s.theme })),
     }),
     {
       name: "tickwise-session",
       partialize: (s) => ({
+        theme: s.theme,
         config: s.config,
         startingBalance: s.startingBalance,
         status: s.status,

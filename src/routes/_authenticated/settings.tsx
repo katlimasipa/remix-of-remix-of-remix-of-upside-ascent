@@ -23,6 +23,13 @@ function Settings() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [accountInfo, setAccountInfo] = useState<{ loginid: string; currency: string; balance: number; is_virtual: boolean } | null>(null);
 
+  // Local state for settings to allow "Save" button
+  const [localConfig, setLocalConfig] = useState(s.config);
+
+  useEffect(() => {
+    setLocalConfig(s.config);
+  }, [s.config]);
+
   const tokenInputType = showToken ? "text" : "password";
 
   useEffect(() => {
@@ -34,6 +41,11 @@ function Settings() {
       }
     });
   }, [user]);
+
+  function saveSettings() {
+    s.setConfig(localConfig);
+    toast.success("Strategy settings saved.");
+  }
 
   async function saveAndTest() {
     if (!user) return;
@@ -89,9 +101,17 @@ function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Defaults for new trading sessions." />
+      <PageHeader 
+        title="Settings" 
+        subtitle="Defaults for new trading sessions." 
+        action={
+          <button onClick={saveSettings} className="rounded bg-primary px-6 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-primary-foreground hover:brightness-110 active:scale-95">
+            Save_Config_
+          </button>
+        }
+      />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2 pb-20">
         <Panel className="lg:col-span-2">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -137,19 +157,30 @@ function Settings() {
         </Panel>
 
         <Panel>
+          <h3 className="font-display text-lg font-semibold">Appearance</h3>
+          <div className="mt-4">
+            <Toggle 
+              label="Light mode terminal" 
+              v={s.theme === "light"} 
+              onChange={(v) => s.setTheme(v ? "light" : "dark")} 
+            />
+          </div>
+        </Panel>
+
+        <Panel>
           <h3 className="font-display text-lg font-semibold">Risk</h3>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Field label="Take profit ($)">
-              <input type="number" min={0} value={s.config.takeProfit ?? 0} onChange={(e) => s.setConfig({ takeProfit: +e.target.value || null })} className="input" />
+              <input type="number" min={0} value={localConfig.takeProfit ?? 0} onChange={(e) => setLocalConfig({ ...localConfig, takeProfit: +e.target.value || null })} className="input" />
             </Field>
             <Field label="Stop loss ($)">
-              <input type="number" min={0} value={s.config.stopLoss ?? 0} onChange={(e) => s.setConfig({ stopLoss: +e.target.value || null })} className="input" />
+              <input type="number" min={0} value={localConfig.stopLoss ?? 0} onChange={(e) => setLocalConfig({ ...localConfig, stopLoss: +e.target.value || null })} className="input" />
             </Field>
             <Field label="Max trades">
-              <input type="number" min={0} value={s.config.maxTrades ?? 0} onChange={(e) => s.setConfig({ maxTrades: +e.target.value || null })} className="input" />
+              <input type="number" min={0} value={localConfig.maxTrades ?? 0} onChange={(e) => setLocalConfig({ ...localConfig, maxTrades: +e.target.value || null })} className="input" />
             </Field>
             <Field label="Cooldown (sec)">
-              <input type="number" min={0} value={s.config.cooldownSeconds} onChange={(e) => s.setConfig({ cooldownSeconds: +e.target.value })} className="input" />
+              <input type="number" min={0} value={localConfig.cooldownSeconds} onChange={(e) => setLocalConfig({ ...localConfig, cooldownSeconds: +e.target.value })} className="input" />
             </Field>
           </div>
         </Panel>
@@ -157,14 +188,14 @@ function Settings() {
         <Panel>
           <h3 className="font-display text-lg font-semibold">Martingale</h3>
           <div className="mt-4 space-y-3">
-            <Toggle label="Enabled" v={s.config.martingaleEnabled} onChange={(v) => s.setConfig({ martingaleEnabled: v })} />
-            <Toggle label="Reset on win" v={s.config.resetOnWin} onChange={(v) => s.setConfig({ resetOnWin: v })} />
+            <Toggle label="Enabled" v={localConfig.martingaleEnabled} onChange={(v) => setLocalConfig({ ...localConfig, martingaleEnabled: v })} />
+            <Toggle label="Reset on win" v={localConfig.resetOnWin} onChange={(v) => setLocalConfig({ ...localConfig, resetOnWin: v })} />
             <div className="grid grid-cols-2 gap-3">
               <Field label="Multiplier">
-                <input type="number" step={0.1} min={1.1} value={s.config.martingaleMultiplier} onChange={(e) => s.setConfig({ martingaleMultiplier: +e.target.value })} className="input" />
+                <input type="number" step={0.1} min={1.1} value={localConfig.martingaleMultiplier} onChange={(e) => setLocalConfig({ ...localConfig, martingaleMultiplier: +e.target.value })} className="input" />
               </Field>
               <Field label="Max levels">
-                <input type="number" min={1} max={15} value={s.config.maxMartingaleLevels} onChange={(e) => s.setConfig({ maxMartingaleLevels: +e.target.value })} className="input" />
+                <input type="number" min={1} max={15} value={localConfig.maxMartingaleLevels} onChange={(e) => setLocalConfig({ ...localConfig, maxMartingaleLevels: +e.target.value })} className="input" />
               </Field>
             </div>
           </div>
@@ -174,13 +205,10 @@ function Settings() {
           <h3 className="font-display text-lg font-semibold">Trade defaults</h3>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Field label="Base stake ($)">
-              <input type="number" step={0.1} min={0.1} value={s.config.baseStake} onChange={(e) => s.setConfig({ baseStake: +e.target.value })} className="input" />
+              <input type="number" step={0.1} min={0.1} value={localConfig.baseStake} onChange={(e) => setLocalConfig({ ...localConfig, baseStake: +e.target.value })} className="input" />
             </Field>
             <Field label="Duration (ticks)">
-              <input type="number" min={1} max={30} value={s.config.durationTicks} onChange={(e) => s.setConfig({ durationTicks: +e.target.value })} className="input" />
-            </Field>
-            <Field label="Starting balance ($)">
-              <input type="number" min={1} value={s.startingBalance} onChange={(e) => useSession.setState({ startingBalance: +e.target.value })} className="input" />
+              <input type="number" min={1} max={30} value={localConfig.durationTicks} onChange={(e) => setLocalConfig({ ...localConfig, durationTicks: +e.target.value })} className="input" />
             </Field>
           </div>
         </Panel>
@@ -195,6 +223,12 @@ function Settings() {
             Reset current session
           </button>
         </Panel>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-background/80 p-4 backdrop-blur-lg lg:hidden">
+        <button onClick={saveSettings} className="w-full rounded-xl bg-primary py-3 font-mono text-[10px] font-black uppercase tracking-[0.2em] text-primary-foreground shadow-lg shadow-primary/20 transition-all active:scale-95">
+          Save_Kernel_Settings_
+        </button>
       </div>
 
       <style>{`.input{width:100%;background:var(--input);border:1px solid var(--border);border-radius:.65rem;padding:.55rem .7rem;font-size:.85rem;color:var(--foreground);outline:none}.input:focus{border-color:var(--primary)}`}</style>

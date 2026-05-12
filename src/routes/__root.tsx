@@ -83,8 +83,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootShell({ children }: { children: React.ReactNode }) {
+  const theme = useSession((s) => s.theme);
   return (
-    <html lang="en">
+    <html lang="en" className={theme === "light" ? "light" : "dark"} style={{ colorScheme: theme }}>
       <head><HeadContent /></head>
       <body>
         {children}
@@ -96,11 +97,12 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const theme = useSession((s) => s.theme);
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Outlet />
-        <Toaster richColors position="top-center" theme="dark" />
+        <Toaster richColors position="top-center" theme={theme} />
       </AuthProvider>
     </QueryClientProvider>
   );

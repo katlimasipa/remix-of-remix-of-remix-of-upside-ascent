@@ -55,23 +55,52 @@ function Dashboard() {
 
       {/* Runtime Status */}
       <Panel className="border-border/60 bg-surface/40 backdrop-blur-sm">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">System_Runtime_State</div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                 <div className={`h-2.5 w-2.5 rounded-full ${s.status === "running" ? "bg-up shadow-[0_0_10px_rgba(var(--up),0.5)]" : s.status === "paused" ? "bg-warn" : "bg-muted-foreground/40"}`} />
-                 {s.status === "running" && <div className="absolute inset-0 h-2.5 w-2.5 animate-ping rounded-full bg-up/40" />}
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-1 items-center justify-between border-b border-border/20 pb-4 md:border-b-0 md:pb-0">
+            <div className="space-y-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">System_Runtime_State</div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                   <div className={`h-2.5 w-2.5 rounded-full ${s.status === "running" ? "bg-up shadow-[0_0_10px_rgba(var(--up),0.5)]" : s.status === "paused" ? "bg-warn" : "bg-muted-foreground/40"}`} />
+                   {s.status === "running" && <div className="absolute inset-0 h-2.5 w-2.5 animate-ping rounded-full bg-up/40" />}
+                </div>
+                <span className="font-display text-2xl font-black uppercase tracking-tighter">{s.status}_</span>
               </div>
-              <span className="font-display text-2xl font-black uppercase tracking-tighter">{s.status}_</span>
+            </div>
+            <div className="text-right space-y-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Session_Chronometer</div>
+              <div className="flex items-center justify-end gap-2 font-display text-2xl font-black tabular-nums tracking-tighter">
+                <Timer className="h-5 w-5 text-muted-foreground/60" />
+                {elapsed.toUpperCase()}
+              </div>
             </div>
           </div>
-          <div className="text-right space-y-1">
-            <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Session_Chronometer</div>
-            <div className="flex items-center justify-end gap-2 font-display text-2xl font-black tabular-nums tracking-tighter">
-              <Timer className="h-5 w-5 text-muted-foreground/60" />
-              {elapsed.toUpperCase()}
-            </div>
+
+          <div className="flex gap-2">
+            {s.status === "running" && (
+              <button 
+                onClick={() => s.pauseSession()}
+                className="flex-1 rounded border border-border px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:bg-muted/10 md:flex-none"
+              >
+                Pause_
+              </button>
+            )}
+            {s.status === "paused" && (
+              <button 
+                onClick={() => s.resumeSession()}
+                className="flex-1 rounded border border-primary px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-primary hover:bg-primary/10 md:flex-none"
+              >
+                Resume_
+              </button>
+            )}
+            {(s.status === "running" || s.status === "paused") && (
+              <button 
+                onClick={() => s.endSession()}
+                className="flex-1 rounded bg-down px-6 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-down-foreground hover:brightness-110 md:flex-none"
+              >
+                End_Session_
+              </button>
+            )}
           </div>
         </div>
       </Panel>
