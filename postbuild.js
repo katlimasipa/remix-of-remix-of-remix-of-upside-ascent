@@ -1,58 +1,87 @@
 import fs from 'fs';
 import path from 'path';
+import { build } from 'esbuild';
 
 const distServer = path.resolve('dist/server');
 const distClient = path.resolve('dist/client');
 const apiDir = path.resolve('api');
 const publicDir = path.resolve('public');
 
-console.log('Staging files for Vercel...');
+async function run() {
+  console.log('Starting ultimate Vercel staging process...');
 
-if (!fs.existsSync(apiDir)) fs.mkdirSync(apiDir, { recursive: true });
-if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+  if (!fs.existsSync(apiDir)) fs.mkdirSync(apiDir, { recursive: true });
+  if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
 
-function copyRecursive(src, dest) {
-  if (!fs.existsSync(src)) return;
-  const stats = fs.statSync(src);
-  if (stats.isDirectory()) {
-    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
-    fs.readdirSync(src).forEach(child => {
-      copyRecursive(path.join(src, child), path.join(dest, child));
-    });
-  } else {
-    fs.copyFileSync(src, dest);
+  // 1. Copy client assets to public/
+  function copyRecursive(src, dest) {
+    if (!fs.existsSync(src)) return;
+    const stats = fs.statSync(src);
+    if (stats.isDirectory()) {
+      if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+      fs.readdirSync(src).forEach(child => {
+        copyRecursive(path.join(src, child), path.join(dest, child));
+      });
+    } else {
+      fs.copyFileSync(src, dest);
+    }
   }
-}
 
-// 1. Copy client assets to public/ for static serving
-if (fs.existsSync(distClient)) {
-  copyRecursive(distClient, publicDir);
-  console.log('Copied client files to public/');
-}
+  if (fs.existsSync(distClient)) {
+    copyRecursive(distClient, publicDir);
+    console.log('✓ Staged static assets in public/');
+  }
 
-// 2. Resolve the hashed server entry and create a static bridge in api/index.js
-if (fs.existsSync(distServer)) {
-  const assetsDir = path.join(distServer, 'assets');
-  const files = fs.readdirSync(assetsDir);
-  const serverEntry = files.find(f => f.startsWith('server-') && f.endsWith('.js'));
-  
-  if (serverEntry) {
-    console.log(`Found server entry: ${serverEntry}`);
+  // 2. Find server entry and bundle it into a single file
+  if (fs.existsSync(distServer)) {
+    const assetsDir = path.join(distServer, 'assets');
+    const files = fs.readdirSync(assetsDir);
+    const serverEntryFile = files.find(f => f.startsWith('server-') && f.endsWith('.js'));
     
-    // Create a self-contained bridge in api/index.js
-    // We import the hashed entry STATICALLY so Vercel's bundler can find it.
+    if (!serverEntryFile) {
+      console.error('✗ Could not find server entry.');
+      process.exit(1);
+    }
+
+    const serverEntryPath = path.join(assetsDir, serverEntryFile);
+    console.log(`✓ Found server entry: ${serverEntryFile}`);
+
+    // Create a temporary bridge to be the entry point for esbuild
+    const bridgePath = path.join(apiDir, '_bridge.js');
     const bridgeContent = `
 import { toNodeHandler } from 'srvx/node';
-import serverEntry from '../dist/server/assets/${serverEntry}';
-
-// Replicate the error wrapping from src/server.ts if needed, 
-// but for now let's just bridge the core handler.
+import serverEntry from '${serverEntryPath.replace(/\\/g, '/')}';
 export default toNodeHandler(serverEntry.fetch || serverEntry.default?.fetch || serverEntry);
 `;
-    fs.writeFileSync(path.join(apiDir, 'index.js'), bridgeContent);
-    console.log('Created static bridge in api/index.js');
-  } else {
-    console.error('Could not find server entry in dist/server/assets');
-    process.exit(1);
+    fs.writeFileSync(bridgePath, bridgeContent);
+
+    console.log('Bundling SSR function with esbuild...');
+    try {
+      await build({
+        entryPoints: [bridgePath],
+        bundle: true,
+        outfile: path.join(apiDir, 'index.js'),
+        platform: 'node',
+        format: 'esm',
+        target: 'node22',
+        minify: true,
+        sourcemap: false,
+        external: ['node:*', 'aws-sdk', 'mock-aws-s3', 'nock'], // Standard Node externals + optional ones that sometimes break bundling
+        banner: {
+          js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+        },
+      });
+      console.log('✓ Successfully bundled entire SSR engine into api/index.js');
+      
+      // Cleanup bridge
+      fs.unlinkSync(bridgePath);
+    } catch (err) {
+      console.error('✗ Bundling failed:', err);
+      process.exit(1);
+    }
   }
+
+  console.log('Ready for Vercel deployment.');
 }
+
+run();
