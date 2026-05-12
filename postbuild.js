@@ -63,7 +63,7 @@ export default toNodeHandler(serverEntry.fetch || serverEntry.default?.fetch || 
         outfile: path.join(apiDir, 'index.js'),
         platform: 'node',
         format: 'esm',
-        target: 'node22',
+        target: 'node20',
         minify: true,
         sourcemap: false,
         external: ['node:*', 'aws-sdk', 'mock-aws-s3', 'nock'], // Standard Node externals + optional ones that sometimes break bundling
