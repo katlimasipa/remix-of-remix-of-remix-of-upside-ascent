@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -9,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/lib/auth";
+import { useSession } from "@/lib/store";
 
 import appCss from "../styles.css?url";
 
@@ -82,7 +84,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
-import { useEffect, useState } from "react";
 
 function RootShell({ children }: { children: React.ReactNode }) {
   const theme = useSession((s) => s.theme);
