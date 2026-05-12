@@ -87,7 +87,7 @@ function Terminal() {
   useEffect(() => {
     const durationTicks = Math.max(2, Math.min(5, Math.round(s.config.durationTicks)));
     if (durationTicks !== s.config.durationTicks) s.setConfig({ durationTicks });
-  }, [s]);
+  }, [s.config.durationTicks, s.setConfig]);
 
   // Subscribe to live tick stream + backfill recent history
   useEffect(() => {
