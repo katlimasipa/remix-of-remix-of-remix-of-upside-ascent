@@ -351,7 +351,7 @@ function Terminal() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_ups" }); placeTrade("up"); }}
+                onClick={() => { s.setConfig({ strategy: "only_ups", autoTrade: true }); placeTrade("up"); }}
                 className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-up py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50"
               >
                 <TrendingUp className="h-6 w-6" />
@@ -360,7 +360,7 @@ function Terminal() {
               </button>
               <button
                 disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_downs" }); placeTrade("down"); }}
+                onClick={() => { s.setConfig({ strategy: "only_downs", autoTrade: true }); placeTrade("down"); }}
                 className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-down py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50"
               >
                 <TrendingDown className="h-6 w-6" />
@@ -369,6 +369,7 @@ function Terminal() {
               </button>
             </div>
             <p className="mt-3 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
+            <p className="mt-1 text-center text-[10px] uppercase tracking-widest text-primary/80">Bot keeps entering until take-profit / stop-loss is hit</p>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               {s.status !== "running" ? (
@@ -388,10 +389,10 @@ function Terminal() {
             <div className="mt-3 space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Stake">
-                  <input type="number" min={0.35} step={0.1} value={s.config.baseStake} onChange={(e) => s.setConfig({ baseStake: +e.target.value })} className="select-base" />
+                  <NumInput value={s.config.baseStake} onCommit={(n) => s.setConfig({ baseStake: n })} min={0.01} step={0.1} />
                 </Field>
                 <Field label="Ticks">
-                  <input type="number" min={5} max={10} value={s.config.durationTicks} onChange={(e) => s.setConfig({ durationTicks: Math.max(5, Math.min(10, +e.target.value)) })} className="select-base" />
+                  <NumInput value={s.config.durationTicks} onCommit={(n) => s.setConfig({ durationTicks: Math.max(5, Math.min(10, Math.round(n))) })} min={5} max={10} step={1} integer />
                 </Field>
               </div>
               <label className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
@@ -401,10 +402,10 @@ function Terminal() {
               {s.config.martingaleEnabled && (
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Multiplier">
-                    <input type="number" step={0.1} min={1.1} value={s.config.martingaleMultiplier} onChange={(e) => s.setConfig({ martingaleMultiplier: +e.target.value })} className="select-base" />
+                    <NumInput value={s.config.martingaleMultiplier} onCommit={(n) => s.setConfig({ martingaleMultiplier: Math.max(1.1, n) })} min={1.1} step={0.1} />
                   </Field>
                   <Field label="Max levels">
-                    <input type="number" min={1} max={15} value={s.config.maxMartingaleLevels} onChange={(e) => s.setConfig({ maxMartingaleLevels: +e.target.value })} className="select-base" />
+                    <NumInput value={s.config.maxMartingaleLevels} onCommit={(n) => s.setConfig({ maxMartingaleLevels: Math.max(1, Math.min(15, Math.round(n))) })} min={1} max={15} step={1} integer />
                   </Field>
                 </div>
               )}
@@ -534,5 +535,58 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * Number input that lets the user type freely (including empty/partial like "0." or "")
+ * and only commits a valid number on blur or Enter. No spinner placeholders that
+ * fight the user's typing.
+ */
+function NumInput({
+  value,
+  onCommit,
+  min,
+  max,
+  step = 1,
+  integer = false,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  integer?: boolean;
+}) {
+  const [text, setText] = useState<string>(String(value));
+  const focusedRef = useRef(false);
+  useEffect(() => { if (!focusedRef.current) setText(String(value)); }, [value]);
+  function commit() {
+    const raw = text.trim();
+    if (raw === "" || raw === "-" || raw === "." || raw === "-.") { setText(String(value)); return; }
+    let n = Number(raw);
+    if (!Number.isFinite(n)) { setText(String(value)); return; }
+    if (integer) n = Math.round(n);
+    if (min != null && n < min) n = min;
+    if (max != null && n > max) n = max;
+    setText(String(n));
+    onCommit(n);
+  }
+  return (
+    <input
+      type="text"
+      inputMode={integer ? "numeric" : "decimal"}
+      value={text}
+      onFocus={(e) => { focusedRef.current = true; e.currentTarget.select(); }}
+      onChange={(e) => {
+        const v = e.target.value;
+        // allow empty + valid numeric fragments
+        if (v === "" || /^-?\d*\.?\d*$/.test(v)) setText(v);
+      }}
+      onBlur={() => { focusedRef.current = false; commit(); }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      step={step}
+      className="select-base"
+    />
   );
 }
