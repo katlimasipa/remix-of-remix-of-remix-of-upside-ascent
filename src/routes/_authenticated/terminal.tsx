@@ -168,7 +168,7 @@ function Terminal() {
 
   const placeTrade = useCallback(async (direction: Direction) => {
     const cur = useSession.getState();
-    if (cur.status !== "running") return toast.error("Start a session first.");
+    if (cur.status !== "running") return;
     if (!clientRef.current) return toast.error("Not connected.");
     if (tradingRef.current) return; // already trading
 
