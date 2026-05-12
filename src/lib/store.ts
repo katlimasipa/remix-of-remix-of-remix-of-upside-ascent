@@ -132,7 +132,7 @@ export const useSession = create<SessionState & Actions>()(
         set((s) => ({
           id: crypto.randomUUID(),
           status: "running",
-          startedAt: Date.now(),
+          startedAt: typeof window !== "undefined" ? Date.now() : 0,
           endedAt: null,
           startingBalance,
           balance: startingBalance,
@@ -175,6 +175,7 @@ export const useSession = create<SessionState & Actions>()(
     }),
     {
       name: "tickwise-session",
+      skipHydration: true, // Crucial for SSR
       partialize: (s) => ({
         theme: s.theme,
         config: s.config,
