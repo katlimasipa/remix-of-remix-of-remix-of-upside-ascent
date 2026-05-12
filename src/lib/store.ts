@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Direction, Strategy } from "./trading";
+import type { Direction, EntryMode, Strategy } from "./trading";
 
 export type TradeRecord = {
   id: string;
@@ -28,6 +28,9 @@ export type SessionConfig = {
   maxTrades: number | null;
   cooldownSeconds: number;
   autoTrade: boolean;
+  // Bot signal filters
+  entryMode: EntryMode;
+  streakTicks: number;
 };
 
 export type SessionState = {
@@ -71,6 +74,8 @@ export const defaultConfig: SessionConfig = {
   maxTrades: 100,
   cooldownSeconds: 2,
   autoTrade: false,
+  entryMode: "streak",
+  streakTicks: 3,
 };
 
 type Actions = {
