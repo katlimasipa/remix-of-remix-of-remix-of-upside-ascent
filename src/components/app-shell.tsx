@@ -147,3 +147,14 @@ export function StatCard({
     </div>
   );
 }
+
+export function SiteFooter() {
+  return (
+    <footer className="mx-auto mt-8 max-w-6xl px-4 pb-28 pt-2 text-center text-[11px] text-muted-foreground md:px-8 md:pb-8">
+      Built by{" "}
+      <a href="https://architeq.co.za" target="_blank" rel="noreferrer" className="font-medium text-foreground hover:text-primary">
+        Architeq Web Agency
+      </a>
+    </footer>
+  );
+}
