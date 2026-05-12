@@ -40,5 +40,9 @@ function AuthLayout() {
       </div>
     );
   }
+  if (loc.pathname.startsWith("/onboarding")) {
+    return <Outlet />;
+  }
+
   return <AppShell><Outlet /></AppShell>;
 }
