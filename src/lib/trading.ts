@@ -101,3 +101,46 @@ export function fmtMoney(n: number, currency = "$") {
 export function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
+
+// ─── Bot signal engine ──────────────────────────────────────────────────────
+// Entry filters used by the auto-trader to decide WHEN to fire a trade.
+
+export type EntryMode = "always" | "streak" | "reversal";
+
+export type SignalConfig = {
+  mode: EntryMode;
+  streakTicks: number; // how many consecutive ticks in the trigger direction
+  direction: Direction; // bot bias
+};
+
+/**
+ * Decide whether the bot should enter NOW based on the recent tick window.
+ * - "always":   fire whenever ready
+ * - "streak":   N consecutive ticks moving in the bot's bias direction (momentum)
+ * - "reversal": N consecutive ticks moving OPPOSITE to bias, then enter (mean-revert)
+ */
+export function evaluateSignal(
+  ticks: number[],
+  cfg: SignalConfig,
+): { fire: boolean; reason: string } {
+  if (cfg.mode === "always") return { fire: true, reason: "always-on" };
+  const need = Math.max(2, cfg.streakTicks);
+  if (ticks.length < need + 1) return { fire: false, reason: `waiting for ${need + 1} ticks` };
+  const window = ticks.slice(-(need + 1));
+  let allUp = true, allDown = true;
+  for (let i = 1; i < window.length; i++) {
+    if (!(window[i] > window[i - 1])) allUp = false;
+    if (!(window[i] < window[i - 1])) allDown = false;
+  }
+  if (cfg.mode === "streak") {
+    const ok = cfg.direction === "up" ? allUp : allDown;
+    return ok
+      ? { fire: true, reason: `${need} ${cfg.direction} ticks in a row` }
+      : { fire: false, reason: `waiting for ${need} ${cfg.direction} streak` };
+  }
+  // reversal: opposite streak triggers entry in bias direction
+  const ok = cfg.direction === "up" ? allDown : allUp;
+  return ok
+    ? { fire: true, reason: `reversal after ${need} opposite ticks` }
+    : { fire: false, reason: `waiting for ${need} opposite-streak` };
+}

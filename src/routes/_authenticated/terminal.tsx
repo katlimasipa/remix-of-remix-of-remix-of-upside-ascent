@@ -3,9 +3,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "@/lib/store";
 import { PageHeader, Panel, StatCard } from "@/components/app-shell";
 import { TickChart, type TickPoint } from "@/components/tick-chart";
-import { STRATEGIES, nextStake, totalExposure, fmtMoney, type Direction } from "@/lib/trading";
+import { STRATEGIES, nextStake, totalExposure, fmtMoney, evaluateSignal, type Direction } from "@/lib/trading";
 import { DerivClient, DERIV_MARKETS } from "@/lib/deriv";
-import { Play, Square, TrendingUp, TrendingDown, Zap, Wifi, WifiOff, Loader2, AlertTriangle } from "lucide-react";
+import { Play, Square, TrendingUp, TrendingDown, Zap, Wifi, WifiOff, Loader2, AlertTriangle, Bot } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -33,6 +33,7 @@ function Terminal() {
   const [lastQuote, setLastQuote] = useState<number | null>(null);
   const [connState, setConnState] = useState<"idle" | "connecting" | "connected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [signalReason, setSignalReason] = useState<string>("idle");
 
   // Load saved token
   useEffect(() => {
@@ -230,7 +231,9 @@ function Terminal() {
     }
   }, [endSession, s, user]);
 
-  // Auto-trade loop — kicks off as soon as previous trade settles
+  // Auto-trade loop — waits for an entry signal, then fires & awaits settlement
+  const ticksRef = useRef<TickPoint[]>([]);
+  useEffect(() => { ticksRef.current = ticks; }, [ticks]);
   useEffect(() => {
     if (!s.config.autoTrade || s.status !== "running") return;
     let cancelled = false;
@@ -239,12 +242,32 @@ function Terminal() {
         const cur = useSession.getState();
         if (cur.status !== "running" || !cur.config.autoTrade) break;
         const dir = STRATEGIES.find(x => x.id === cur.config.strategy)!.direction;
+        // Wait for signal
+        // Poll the latest tick window every 250ms until signal fires
+        // (cheap, since ticks update via state)
+        // Safety cap: 60s wait per entry then fall through anyway
+        const waitStart = Date.now();
+        while (!cancelled) {
+          const quotes = ticksRef.current.map((t) => t.quote);
+          const sig = evaluateSignal(quotes, {
+            mode: cur.config.entryMode,
+            streakTicks: cur.config.streakTicks,
+            direction: dir,
+          });
+          setSignalReason(sig.reason);
+          if (sig.fire) break;
+          if (Date.now() - waitStart > 60000) { setSignalReason("timeout — firing"); break; }
+          await new Promise((r) => setTimeout(r, 250));
+          if (useSession.getState().status !== "running" || !useSession.getState().config.autoTrade) return;
+        }
+        if (cancelled) return;
+        setSignalReason(`entering ${dir.toUpperCase()}`);
         await placeTrade(dir);
         await new Promise(r => setTimeout(r, Math.max(500, cur.config.cooldownSeconds * 1000)));
       }
     };
     loop();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setSignalReason("idle"); };
   }, [s.config.autoTrade, s.status, placeTrade]);
 
   const strategy = STRATEGIES.find((x) => x.id === s.config.strategy)!;
@@ -389,6 +412,30 @@ function Terminal() {
                 <div><span className="text-sm font-medium">Auto-trade</span><div className="text-[10px] text-muted-foreground">{s.config.cooldownSeconds}s between trades</div></div>
                 <input type="checkbox" checked={s.config.autoTrade} onChange={(e) => s.setConfig({ autoTrade: e.target.checked })} className="h-4 w-4 accent-primary" />
               </label>
+              <div className="rounded-xl border border-border bg-surface/40 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Bot signal</span>
+                  {s.config.autoTrade && s.status === "running" && (
+                    <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-primary">{signalReason}</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Entry mode">
+                    <select value={s.config.entryMode} onChange={(e) => s.setConfig({ entryMode: e.target.value as any })} className="select-base">
+                      <option value="always">Always (fire ASAP)</option>
+                      <option value="streak">Momentum streak</option>
+                      <option value="reversal">Reversal after opposite streak</option>
+                    </select>
+                  </Field>
+                  <Field label="Streak ticks">
+                    <input type="number" min={2} max={10} value={s.config.streakTicks} onChange={(e) => s.setConfig({ streakTicks: Math.max(2, Math.min(10, +e.target.value)) })} className="select-base" disabled={s.config.entryMode === "always"} />
+                  </Field>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  Bot trades <span className="font-mono uppercase">{strategy.label}</span>. {s.config.entryMode === "streak" && `Waits for ${s.config.streakTicks} ticks moving ${strategy.direction === "up" ? "up" : "down"} before entering.`} {s.config.entryMode === "reversal" && `Waits for ${s.config.streakTicks} ticks moving ${strategy.direction === "up" ? "down" : "up"} (mean-reversion entry).`} {s.config.entryMode === "always" && "Fires whenever cooldown elapses."}
+                </p>
+              </div>
             </div>
           </Panel>
         </div>
