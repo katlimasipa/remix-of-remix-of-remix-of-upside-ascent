@@ -101,14 +101,19 @@ function Settings() {
             {savedToken && <span className="flex items-center gap-1 rounded-full bg-up/15 px-2 py-1 text-[10px] font-mono uppercase tracking-widest text-up"><ShieldCheck className="h-3 w-3" /> Connected</span>}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Deriv API token (read + trade scopes)"
-              className="input"
-              autoComplete="off"
-            />
+            <div className="flex items-center rounded-xl border border-border bg-input focus-within:border-primary">
+              <input
+                type={tokenInputType}
+                value={token}
+                onChange={(e) => { setToken(e.target.value); setTokenError(null); }}
+                placeholder="Paste Deriv demo token"
+                className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-foreground outline-none"
+                autoComplete="off"
+              />
+              <button type="button" onClick={() => setShowToken((v) => !v)} className="grid h-10 w-10 place-items-center text-muted-foreground hover:text-foreground" aria-label={showToken ? "Hide token" : "Show token"}>
+                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
             <div className="flex gap-2">
               <button onClick={saveAndTest} disabled={testing} className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
                 {testing ? <Loader2 className="inline h-4 w-4 animate-spin" /> : savedToken ? "Update & verify" : "Connect"}
@@ -116,6 +121,7 @@ function Settings() {
               {savedToken && <button onClick={clearToken} className="rounded-full border border-border px-3 py-2 text-sm">Disconnect</button>}
             </div>
           </div>
+          {tokenError && <div className="mt-3 flex gap-2 rounded-xl border border-down/30 bg-down/10 p-3 text-xs text-down"><AlertTriangle className="h-4 w-4 shrink-0" />{tokenError}</div>}
           {accountInfo && (
             <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-border bg-surface/40 p-3 text-xs">
               <div><div className="font-mono text-[10px] uppercase text-muted-foreground">Account</div><div className="font-semibold tabular">{accountInfo.loginid}</div></div>
@@ -126,6 +132,7 @@ function Settings() {
           <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline">
             Get a token from Deriv <ExternalLink className="h-3 w-3" />
           </a>
+          <Link to="/onboarding" className="ml-3 inline-flex items-center gap-1 text-xs text-primary hover:underline">Open simple connector</Link>
           <p className="mt-1 text-[11px] text-muted-foreground">Required scopes: <code>read</code>, <code>trade</code>. Switch to a Virtual account before generating the token.</p>
         </Panel>
 
