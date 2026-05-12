@@ -113,6 +113,14 @@ export class DerivClient {
 
   async authorize(token: string) {
     const res = await this.send({ authorize: token });
+    const scopes: string[] = res.authorize?.scopes ?? [];
+    const required = ["read", "trade"];
+    const missing = required.filter((s) => !scopes.includes(s));
+    if (missing.length) {
+      throw new Error(
+        `Token is missing required scope(s): ${missing.join(", ")}. Re-create the token at app.deriv.com with read + trade scopes.`
+      );
+    }
     this.onAuth?.(res.authorize);
     // subscribe to balance updates
     await this.send({ balance: 1, subscribe: 1 });
