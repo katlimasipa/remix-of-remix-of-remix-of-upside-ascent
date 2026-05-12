@@ -74,7 +74,7 @@ export const defaultConfig: SessionConfig = {
   maxTrades: 100,
   cooldownSeconds: 2,
   autoTrade: false,
-  entryMode: "streak",
+  entryMode: "always",
   streakTicks: 3,
 };
 

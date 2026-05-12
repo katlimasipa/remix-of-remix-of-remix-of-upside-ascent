@@ -168,7 +168,7 @@ function Terminal() {
 
   const placeTrade = useCallback(async (direction: Direction) => {
     const cur = useSession.getState();
-    if (cur.status !== "running") return toast.error("Start a session first.");
+    if (cur.status !== "running") return;
     if (!clientRef.current) return toast.error("Not connected.");
     if (tradingRef.current) return; // already trading
 
@@ -241,13 +241,13 @@ function Terminal() {
       while (!cancelled) {
         const cur = useSession.getState();
         if (cur.status !== "running" || !cur.config.autoTrade) break;
+        if (tradingRef.current) { await new Promise(r => setTimeout(r, 200)); continue; }
         const dir = STRATEGIES.find(x => x.id === cur.config.strategy)!.direction;
-        // Wait for signal
-        // Poll the latest tick window every 250ms until signal fires
-        // (cheap, since ticks update via state)
-        // Safety cap: 60s wait per entry then fall through anyway
         const waitStart = Date.now();
+        let fired = false;
         while (!cancelled) {
+          const st = useSession.getState();
+          if (st.status !== "running" || !st.config.autoTrade) return;
           const quotes = ticksRef.current.map((t) => t.quote);
           const sig = evaluateSignal(quotes, {
             mode: cur.config.entryMode,
@@ -255,15 +255,20 @@ function Terminal() {
             direction: dir,
           });
           setSignalReason(sig.reason);
-          if (sig.fire) break;
-          if (Date.now() - waitStart > 60000) { setSignalReason("timeout — firing"); break; }
+          if (sig.fire) { fired = true; break; }
+          if (Date.now() - waitStart > 30000) { setSignalReason("timeout — firing"); fired = true; break; }
           await new Promise((r) => setTimeout(r, 250));
-          if (useSession.getState().status !== "running" || !useSession.getState().config.autoTrade) return;
         }
-        if (cancelled) return;
+        if (cancelled || !fired) return;
         setSignalReason(`entering ${dir.toUpperCase()}`);
-        await placeTrade(dir);
-        await new Promise(r => setTimeout(r, Math.max(500, cur.config.cooldownSeconds * 1000)));
+        try {
+          await placeTrade(dir);
+        } catch (e: any) {
+          toast.error(e?.message ?? "Trade error");
+          setSignalReason("error — retrying");
+        }
+        const cool = Math.max(500, useSession.getState().config.cooldownSeconds * 1000);
+        await new Promise(r => setTimeout(r, cool));
       }
     };
     loop();
@@ -350,22 +355,32 @@ function Terminal() {
           <Panel>
             <div className="grid grid-cols-2 gap-3">
               <button
-                disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_ups", autoTrade: true }); placeTrade("up"); }}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-up py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50"
+                disabled={connState !== "connected"}
+                onClick={async () => {
+                  s.setConfig({ strategy: "only_ups", autoTrade: true });
+                  if (useSession.getState().status !== "running") await start();
+                }}
+                className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-7 text-up-foreground active:scale-[0.98] disabled:opacity-50 ${s.config.autoTrade && s.config.strategy === "only_ups" && s.status === "running" ? "bg-up ring-2 ring-up/50 shadow-lg shadow-up/20" : "bg-up/90 hover:bg-up"}`}
               >
                 <TrendingUp className="h-6 w-6" />
                 <span className="text-base font-bold">ONLY UPS</span>
-                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all rising</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">
+                  {s.config.autoTrade && s.config.strategy === "only_ups" && s.status === "running" ? "● bot live" : `${s.config.durationTicks}t · all rising`}
+                </span>
               </button>
               <button
-                disabled={tradingRef.current || s.status !== "running"}
-                onClick={() => { s.setConfig({ strategy: "only_downs", autoTrade: true }); placeTrade("down"); }}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-down py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50"
+                disabled={connState !== "connected"}
+                onClick={async () => {
+                  s.setConfig({ strategy: "only_downs", autoTrade: true });
+                  if (useSession.getState().status !== "running") await start();
+                }}
+                className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-7 text-down-foreground active:scale-[0.98] disabled:opacity-50 ${s.config.autoTrade && s.config.strategy === "only_downs" && s.status === "running" ? "bg-down ring-2 ring-down/50 shadow-lg shadow-down/20" : "bg-down/90 hover:bg-down"}`}
               >
                 <TrendingDown className="h-6 w-6" />
                 <span className="text-base font-bold">ONLY DOWNS</span>
-                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">{s.config.durationTicks}t · all falling</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest opacity-80">
+                  {s.config.autoTrade && s.config.strategy === "only_downs" && s.status === "running" ? "● bot live" : `${s.config.durationTicks}t · all falling`}
+                </span>
               </button>
             </div>
             <p className="mt-3 text-center text-[11px] text-muted-foreground">{strategy.hint}</p>
@@ -373,12 +388,12 @@ function Terminal() {
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               {s.status !== "running" ? (
-                <button onClick={start} className="col-span-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">
+                <button onClick={start} disabled={connState !== "connected"} className="col-span-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
                   <Play className="-mt-0.5 mr-1 inline h-4 w-4" /> Start session
                 </button>
               ) : (
                 <button onClick={endSession} className="col-span-2 rounded-full bg-down px-4 py-3 text-sm font-semibold text-down-foreground">
-                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> End session
+                  <Square className="-mt-0.5 mr-1 inline h-4 w-4" /> Stop bot
                 </button>
               )}
             </div>
