@@ -1,7 +1,8 @@
-import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useNavigate, useLocation } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/app-shell";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated")({
   component: AuthLayout,
@@ -10,10 +11,25 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthLayout() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const loc = useLocation();
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/login" });
   }, [user, loading, navigate]);
+
+  // Force first-run users through /onboarding until they connect Deriv.
+  useEffect(() => {
+    if (!user) return;
+    if (loc.pathname.startsWith("/onboarding")) return;
+    supabase
+      .from("profiles")
+      .select("deriv_api_token")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data?.deriv_api_token) navigate({ to: "/onboarding" });
+      });
+  }, [user, loc.pathname, navigate]);
 
   if (loading || !user) {
     return (
