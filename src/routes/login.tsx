@@ -59,7 +59,7 @@ function Login() {
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-primary" />
             Persist_Session
           </label>
-          <Link to="/forgot-password" size="sm" className="text-primary/60 hover:text-primary">Key_Recovery</Link>
+          <Link to="/forgot-password" className="text-primary/60 hover:text-primary">Key_Recovery</Link>
         </div>
         <button disabled={loading} className="btn-primary w-full relative group overflow-hidden">
           <span className="relative z-10">{loading ? "INITIALIZING..." : "EXECUTE_SIGN_IN"}</span>
