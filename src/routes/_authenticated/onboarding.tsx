@@ -36,9 +36,26 @@ function Onboarding() {
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
     
-    const urlToken = searchParams.get("token1") || hashParams.get("token1");
-    if (urlToken) {
-      setToken(urlToken);
+    // Deriv OAuth returns multiple accounts (acct1, token1, acct2, token2, etc.)
+    // We need to find the Virtual account (starts with VRTC)
+    let virtualToken = null;
+    
+    const findVirtualToken = (params: URLSearchParams) => {
+      let i = 1;
+      while (params.has(`acct${i}`)) {
+        const acct = params.get(`acct${i}`);
+        if (acct && acct.startsWith('VRTC')) {
+          return params.get(`token${i}`);
+        }
+        i++;
+      }
+      return null;
+    };
+
+    virtualToken = findVirtualToken(searchParams) || findVirtualToken(hashParams) || searchParams.get("token1") || hashParams.get("token1");
+
+    if (virtualToken) {
+      setToken(virtualToken);
       // We don't clean the URL immediately so the auto-save effect can run,
       // or we handle it by setting a ref/state. Let's just use state.
     }
@@ -57,7 +74,20 @@ function Onboarding() {
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-    const urlToken = searchParams.get("token1") || hashParams.get("token1");
+    
+    const findVirtualToken = (params: URLSearchParams) => {
+      let i = 1;
+      while (params.has(`acct${i}`)) {
+        const acct = params.get(`acct${i}`);
+        if (acct && acct.startsWith('VRTC')) {
+          return params.get(`token${i}`);
+        }
+        i++;
+      }
+      return null;
+    };
+    
+    const urlToken = findVirtualToken(searchParams) || findVirtualToken(hashParams) || searchParams.get("token1") || hashParams.get("token1");
     
     if (token && urlToken === token && !saving) {
       // Clean up URL

@@ -4,7 +4,7 @@
 // User supplies their own API token from app.deriv.com -> Settings -> API token.
 // IMPORTANT: instruct users to use a DEMO account token (no real money).
 
-export const DERIV_APP_ID = 1089;
+export const DERIV_APP_ID = import.meta.env.VITE_DERIV_APP_ID || 1089;
 export const DERIV_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_APP_ID}`;
 
 export type DerivTick = { symbol: string; quote: number; epoch: number };
