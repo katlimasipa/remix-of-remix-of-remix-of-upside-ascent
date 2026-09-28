@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/lib/store";
@@ -20,45 +20,56 @@ function friendlyTokenError(message: string) {
   return message || "Token rejected by Deriv.";
 }
 
+/** Extract the virtual-account token from Deriv OAuth callback params */
+function extractOAuthToken(): string | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+
+  const findVirtualToken = (params: URLSearchParams) => {
+    let i = 1;
+    while (params.has(`acct${i}`)) {
+      const acct = params.get(`acct${i}`);
+      if (acct && acct.toUpperCase().startsWith('VRTC')) {
+        return params.get(`token${i}`);
+      }
+      i++;
+    }
+    return null;
+  };
+
+  return (
+    findVirtualToken(searchParams) ||
+    findVirtualToken(hashParams) ||
+    searchParams.get("token1") ||
+    hashParams.get("token1")
+  );
+}
+
 function Onboarding() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Track whether we got a token from the OAuth redirect
+  const oauthTokenRef = useRef<string | null>(null);
+  const autoConnectAttempted = useRef(false);
 
+  // 1. On mount: extract any OAuth token from the URL (no auth dependency)
   useEffect(() => {
-    if (!user) return;
-    
-    // Check if we just returned from Deriv OAuth 2.0
-    // Deriv can pass it in search or hash
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-    
-    // Deriv OAuth returns multiple accounts (acct1, token1, acct2, token2, etc.)
-    // We need to find the Virtual account (starts with VRTC)
-    let virtualToken = null;
-    
-    const findVirtualToken = (params: URLSearchParams) => {
-      let i = 1;
-      while (params.has(`acct${i}`)) {
-        const acct = params.get(`acct${i}`);
-        if (acct && acct.startsWith('VRTC')) {
-          return params.get(`token${i}`);
-        }
-        i++;
-      }
-      return null;
-    };
-
-    virtualToken = findVirtualToken(searchParams) || findVirtualToken(hashParams) || searchParams.get("token1") || hashParams.get("token1");
-
-    if (virtualToken) {
-      setToken(virtualToken);
-      // We don't clean the URL immediately so the auto-save effect can run,
-      // or we handle it by setting a ref/state. Let's just use state.
+    const urlToken = extractOAuthToken();
+    if (urlToken) {
+      oauthTokenRef.current = urlToken;
+      setToken(urlToken);
+      // Clean up URL so tokens aren't lingering in the address bar
+      setTimeout(() => window.history.replaceState({}, document.title, window.location.pathname), 500);
     }
+  }, []);
+
+  // 2. When user auth loads, check if they already have a token saved
+  useEffect(() => {
+    if (authLoading || !user) return;
 
     supabase
       .from("profiles")
@@ -68,38 +79,27 @@ function Onboarding() {
       .then(({ data }) => {
         if (data?.deriv_api_token) navigate({ to: "/terminal" });
       });
-  }, [user, navigate]);
+  }, [user, authLoading, navigate]);
 
-  // Effect to auto-trigger save when token is populated from URL
+  // 3. Auto-connect: once we have BOTH a token from URL AND a logged-in user
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-    
-    const findVirtualToken = (params: URLSearchParams) => {
-      let i = 1;
-      while (params.has(`acct${i}`)) {
-        const acct = params.get(`acct${i}`);
-        if (acct && acct.startsWith('VRTC')) {
-          return params.get(`token${i}`);
-        }
-        i++;
-      }
-      return null;
-    };
-    
-    const urlToken = findVirtualToken(searchParams) || findVirtualToken(hashParams) || searchParams.get("token1") || hashParams.get("token1");
-    
-    if (token && urlToken === token && !saving) {
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-      connectAndSave();
-    }
+    if (autoConnectAttempted.current) return;
+    if (!oauthTokenRef.current) return;       // no OAuth token
+    if (authLoading || !user) return;          // user not ready yet
+    if (!token) return;                        // token state not set yet
+    if (saving) return;                        // already saving
+
+    autoConnectAttempted.current = true;
+    connectAndSave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, user, authLoading]);
 
   async function connectAndSave() {
     const cleanToken = token.trim();
-    if (!user) return;
+    if (!user) {
+      setError("You must be logged in to connect your Deriv account.");
+      return;
+    }
     if (!cleanToken) {
       setError("Paste your Deriv demo API token first.");
       return;
