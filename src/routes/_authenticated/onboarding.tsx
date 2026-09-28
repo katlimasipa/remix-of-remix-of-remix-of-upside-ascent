@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useSession } from "@/lib/store";
-import { DerivClient } from "@/lib/deriv";
+import { DerivClient, DERIV_APP_ID } from "@/lib/deriv";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, Loader2, PlugZap } from "lucide-react";
 
@@ -30,6 +30,19 @@ function Onboarding() {
 
   useEffect(() => {
     if (!user) return;
+    
+    // Check if we just returned from Deriv OAuth 2.0
+    // Deriv can pass it in search or hash
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+    
+    const urlToken = searchParams.get("token1") || hashParams.get("token1");
+    if (urlToken) {
+      setToken(urlToken);
+      // We don't clean the URL immediately so the auto-save effect can run,
+      // or we handle it by setting a ref/state. Let's just use state.
+    }
+
     supabase
       .from("profiles")
       .select("deriv_api_token")
@@ -39,6 +52,20 @@ function Onboarding() {
         if (data?.deriv_api_token) navigate({ to: "/terminal" });
       });
   }, [user, navigate]);
+
+  // Effect to auto-trigger save when token is populated from URL
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+    const urlToken = searchParams.get("token1") || hashParams.get("token1");
+    
+    if (token && urlToken === token && !saving) {
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      connectAndSave();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   async function connectAndSave() {
     const cleanToken = token.trim();
@@ -138,6 +165,22 @@ function Onboarding() {
             </button>
           </div>
         </label>
+        
+        <div className="mt-4 flex items-center justify-between">
+          <div className="h-px w-full bg-border" />
+          <span className="px-4 text-[10px] font-mono uppercase text-muted-foreground">OR</span>
+          <div className="h-px w-full bg-border" />
+        </div>
+
+        <button
+          onClick={() => {
+            // Redirect to Deriv OAuth 2.0
+            window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${DERIV_APP_ID}&brand=deriv`;
+          }}
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface px-5 py-3 text-sm font-semibold text-foreground hover:bg-muted"
+        >
+          <PlugZap className="h-4 w-4 text-primary" /> Connect with Deriv (OAuth)
+        </button>
 
         {error && (
           <div className="mt-3 flex gap-2 rounded-xl border border-down/30 bg-down/10 p-3 text-xs text-down">
